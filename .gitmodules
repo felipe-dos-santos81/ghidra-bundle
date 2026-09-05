@@ -1,0 +1,17 @@
+[submodule "ghidra"]
+	path = ghidra
+	url = https://github.com/NationalSecurityAgency/ghidra.git
+	shallow = true
+[submodule "ghidra-mcp"]
+	path = ghidra-mcp
+	url = https://github.com/bethington/ghidra-mcp.git
+	shallow = true
+[submodule "lx-loader"]
+	path = lx-loader
+	url = https://github.com/yetmorecode/ghidra-lx-loader.git
+	shallow = true
+[submodule "dos-toolbox"]
+	path = dos-toolbox
+	url = https://github.com/plaes/GhidraDosToolbox.git
+	branch = wip-ghidra-12
+	shallow = true

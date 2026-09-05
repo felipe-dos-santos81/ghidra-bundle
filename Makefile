@@ -27,14 +27,6 @@ export JAVA_HOME := $(JAVA21_HOME)
 export PATH := $(JAVA21_HOME)/bin:$(PATH)
 
 # Reusable Macros
-define clone_repo
-	@if [ ! -d "$(1)/.git" ]; then \
-		echo "Cloning $(1)..."; \
-		git clone --depth 1 $(if $(3),--branch $(3)) $(2) $(1); \
-	else \
-		echo "$(1)/ already exists, skipping."; \
-	fi
-endef
 
 define install_extension_zip
 	ZIP=$$(ls -1t $(1) 2>/dev/null | head -n 1); \
@@ -99,21 +91,11 @@ help: ## Print this help message
 env: 00-env
 
 # ── Stage 1: Checkout ─────────────────────────────────────────────────────────
-
-GHIDRA_TAG = Ghidra_12.1.2_build
-GHIDRA_REPO = https://github.com/NationalSecurityAgency/ghidra.git
-GHIDRA_MCP_REPO = https://github.com/bethington/ghidra-mcp.git
-LX_LOADER_REPO = https://github.com/yetmorecode/ghidra-lx-loader.git
-DOS_TOOLBOX_REPO = https://github.com/plaes/GhidraDosToolbox.git
-DOS_TOOLBOX_BRANCH = wip-ghidra-12
-
-01-checkout: ## Shallow clone the four upstream repositories
-	@echo "Checking out upstream repositories..."
-	$(call clone_repo,ghidra,$(GHIDRA_REPO),$(GHIDRA_TAG))
-	$(call clone_repo,ghidra-mcp,$(GHIDRA_MCP_REPO))
-	$(call clone_repo,lx-loader,$(LX_LOADER_REPO))
-	$(call clone_repo,dos-toolbox,$(DOS_TOOLBOX_REPO),$(DOS_TOOLBOX_BRANCH))
-	@printf '\033[32mCheckout complete.\033[0m\n'
+ 
+01-checkout: ## Initialize and update git submodules
+	@echo "Updating git submodules..."
+	git submodule update --init --recursive --depth 1
+	@printf '\033[32mSubmodule checkout complete.\033[0m\n'
 
 checkout: 01-checkout
 
@@ -315,7 +297,7 @@ clean: ## Remove build outputs (dist/, .venv/, repo target/dist artifacts)
 		dos-toolbox/dist dos-toolbox/build dos-toolbox/.gradle
 	@printf '\033[32mClean complete.\033[0m\n'
 
-distclean: clean ## Remove build outputs and cloned checkouts
-	@echo "Removing cloned checkouts..."
-	@rm -rf ghidra ghidra-mcp lx-loader dos-toolbox
+distclean: clean ## Remove build outputs and de-initialize submodules
+	@echo "De-initializing submodules..."
+	git submodule deinit -f --all
 	@printf '\033[32mDistclean complete.\033[0m\n'
