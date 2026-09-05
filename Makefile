@@ -183,3 +183,39 @@ MCP_EXT_DIR = $(INSTALL_DIR)/Ghidra/Extensions/GhidraMCP
 	fi
 
 install-mcp: 04-install-mcp
+
+# ── Stage 5: Install lx-loader Extension ──────────────────────────────────────
+
+LX_LOADER_DIR = $(INSTALL_DIR)/Ghidra/Extensions/ghidra-lx-loader
+LX_LOADER_FALLBACK_URL = https://github.com/yetmorecode/ghidra-lx-loader/releases/download/v12.0.1/ghidra_12.0.1_PUBLIC_20260129_ghidra-lx-loader.zip
+
+05-install-lx-loader: 03-install-ghidra ## Build lx-loader extension using ghidra/gradlew
+	@if [ -d "$(LX_LOADER_DIR)" ]; then \
+		echo "lx-loader extension already installed at $(LX_LOADER_DIR), skipping."; \
+	else \
+		echo "Building lx-loader extension using ghidra Gradle wrapper..."; \
+		if (cd lx-loader && JAVA_HOME="$(JAVA21_HOME)" ../ghidra/gradlew -p . -PGHIDRA_INSTALL_DIR="$(INSTALL_DIR)" buildExtension); then \
+			LX_ZIP=$$(ls -1t lx-loader/dist/*.zip 2>/dev/null | head -n 1); \
+			if [ -z "$$LX_ZIP" ]; then \
+				echo "ERROR: lx-loader zip not found in lx-loader/dist/"; \
+				exit 1; \
+			fi; \
+			echo "Installing built lx-loader $$LX_ZIP..."; \
+			unzip -q "$$LX_ZIP" -d "$(INSTALL_DIR)/Ghidra/Extensions/"; \
+		else \
+			echo "\033[33mWARNING: lx-loader buildExtension failed. Falling back to release zip...\033[0m"; \
+			curl -f -L -o lx-loader/fallback.zip "$(LX_LOADER_FALLBACK_URL)" || exit 1; \
+			unzip -q lx-loader/fallback.zip -d "$(INSTALL_DIR)/Ghidra/Extensions/"; \
+		fi; \
+		if [ -d "$(INSTALL_DIR)/Ghidra/Extensions/lx-loader" ] && [ ! -d "$(LX_LOADER_DIR)" ]; then \
+			mv "$(INSTALL_DIR)/Ghidra/Extensions/lx-loader" "$(LX_LOADER_DIR)"; \
+		fi; \
+		if [ ! -d "$(LX_LOADER_DIR)" ]; then \
+			echo "ERROR: Expected $(LX_LOADER_DIR) after unzip"; \
+			exit 1; \
+		fi; \
+		echo "\033[32mlx-loader extension installed successfully.\033[0m"; \
+	fi
+
+install-lx-loader: 05-install-lx-loader
+
