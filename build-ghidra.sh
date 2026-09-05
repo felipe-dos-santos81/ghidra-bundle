@@ -20,6 +20,7 @@ if [[ -z "$JAVA_HOME" || ! -d "$JAVA_HOME" ]]; then
   echo "ERROR: JAVA_HOME for JDK 21 could not be resolved."
   exit 1
 fi
+export PATH="$JAVA_HOME/bin:$PATH"
 
 echo "Using JAVA_HOME=$JAVA_HOME"
 java -version

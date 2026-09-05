@@ -6,6 +6,8 @@
 
 .NOTPARALLEL:
 
+SHELL := /bin/bash
+
 SERVICE = Ghidra Bundle
 
 # Directories
@@ -47,23 +49,23 @@ help: ## Print this help message
 00-env: ## Validate host prerequisites (JDK 21, Maven, Clang, Python 3, uv, git)
 	@echo "Checking host prerequisites..."
 	@if [ -z "$(JAVA21_HOME)" ] || [ ! -d "$(JAVA21_HOME)" ]; then \
-		echo "\033[31mERROR: JDK 21 not found via /usr/libexec/java_home -F -v 21\033[0m"; \
+		printf '\033[31mERROR: JDK 21 not found via /usr/libexec/java_home -F -v 21\033[0m\n'; \
 		echo "Install JDK 21 using: brew install --cask temurin@21"; \
 		exit 1; \
 	else \
-		echo "\033[32m✔ JDK 21:\033[0m $(JAVA21_HOME)"; \
+		printf '\033[32m✔ JDK 21:\033[0m %s\n' "$(JAVA21_HOME)"; \
 	fi
-	@command -v mvn >/dev/null 2>&1 || { echo "\033[31mERROR: Maven (mvn) not found on PATH\033[0m"; exit 1; }
-	@echo "\033[32m✔ Maven:\033[0m $$(mvn -version | head -n 1)"
-	@command -v clang >/dev/null 2>&1 || { echo "\033[31mERROR: Clang not found (needed for Ghidra decompiler build)\033[0m"; exit 1; }
-	@echo "\033[32m✔ Clang:\033[0m $$(clang --version | head -n 1)"
-	@command -v python3 >/dev/null 2>&1 || { echo "\033[31mERROR: Python 3 not found on PATH\033[0m"; exit 1; }
-	@echo "\033[32m✔ Python:\033[0m $$(python3 --version)"
-	@command -v uv >/dev/null 2>&1 || { echo "\033[31mERROR: uv not found on PATH\033[0m"; exit 1; }
-	@echo "\033[32m✔ uv:\033[0m $$(uv --version)"
-	@command -v git >/dev/null 2>&1 || { echo "\033[31mERROR: Git not found on PATH\033[0m"; exit 1; }
-	@echo "\033[32m✔ Git:\033[0m $$(git --version)"
-	@echo "\033[32mEnvironment check passed.\033[0m"
+	@command -v mvn >/dev/null 2>&1 || { printf '\033[31mERROR: Maven (mvn) not found on PATH\033[0m\n'; exit 1; }
+	@printf '\033[32m✔ Maven:\033[0m %s\n' "$$(mvn -version | head -n 1)"
+	@command -v clang >/dev/null 2>&1 || { printf '\033[31mERROR: Clang not found (needed for Ghidra decompiler build)\033[0m\n'; exit 1; }
+	@printf '\033[32m✔ Clang:\033[0m %s\n' "$$(clang --version | head -n 1)"
+	@command -v python3 >/dev/null 2>&1 || { printf '\033[31mERROR: Python 3 not found on PATH\033[0m\n'; exit 1; }
+	@printf '\033[32m✔ Python:\033[0m %s\n' "$$(python3 --version)"
+	@command -v uv >/dev/null 2>&1 || { printf '\033[31mERROR: uv not found on PATH\033[0m\n'; exit 1; }
+	@printf '\033[32m✔ uv:\033[0m %s\n' "$$(uv --version)"
+	@command -v git >/dev/null 2>&1 || { printf '\033[31mERROR: Git not found on PATH\033[0m\n'; exit 1; }
+	@printf '\033[32m✔ Git:\033[0m %s\n' "$$(git --version)"
+	@printf '\033[32mEnvironment check passed.\033[0m\n'
 
 env: 00-env
 
@@ -78,31 +80,31 @@ DOS_TOOLBOX_BRANCH = wip-ghidra-12
 
 01-checkout: ## Shallow clone the four upstream repositories
 	@echo "Checking out upstream repositories..."
-	@if [ ! -d "ghidra" ]; then \
+	@if [ ! -d "ghidra/.git" ]; then \
 		echo "Cloning Ghidra (tag $(GHIDRA_TAG))..."; \
 		git clone --depth 1 --branch $(GHIDRA_TAG) $(GHIDRA_REPO) ghidra; \
 	else \
 		echo "ghidra/ already exists, skipping."; \
 	fi
-	@if [ ! -d "ghidra-mcp" ]; then \
+	@if [ ! -d "ghidra-mcp/.git" ]; then \
 		echo "Cloning ghidra-mcp..."; \
 		git clone --depth 1 $(GHIDRA_MCP_REPO) ghidra-mcp; \
 	else \
 		echo "ghidra-mcp/ already exists, skipping."; \
 	fi
-	@if [ ! -d "lx-loader" ]; then \
+	@if [ ! -d "lx-loader/.git" ]; then \
 		echo "Cloning ghidra-lx-loader..."; \
 		git clone --depth 1 $(LX_LOADER_REPO) lx-loader; \
 	else \
 		echo "lx-loader/ already exists, skipping."; \
 	fi
-	@if [ ! -d "dos-toolbox" ]; then \
+	@if [ ! -d "dos-toolbox/.git" ]; then \
 		echo "Cloning GhidraDosToolbox (branch $(DOS_TOOLBOX_BRANCH))..."; \
 		git clone --depth 1 --branch $(DOS_TOOLBOX_BRANCH) $(DOS_TOOLBOX_REPO) dos-toolbox; \
 	else \
 		echo "dos-toolbox/ already exists, skipping."; \
 	fi
-	@echo "\033[32mCheckout complete.\033[0m"
+	@printf '\033[32mCheckout complete.\033[0m\n'
 
 checkout: 01-checkout
 
@@ -130,7 +132,7 @@ build-ghidra: 02-build-ghidra
 		fi; \
 		echo "Extracting $$ZIP_FILE to $(DIST_DIR)..."; \
 		mkdir -p $(DIST_DIR); \
-		unzip -q "$$ZIP_FILE" -d $(DIST_DIR); \
+		unzip -q -o "$$ZIP_FILE" -d $(DIST_DIR); \
 		EXTRACTED_DIR=$$(ls -d $(DIST_DIR)/ghidra_12.1.2_* | head -n 1); \
 		if [ "$$EXTRACTED_DIR" != "$(INSTALL_DIR)" ]; then \
 			echo "Normalizing $$EXTRACTED_DIR to $(INSTALL_DIR)..."; \
@@ -149,7 +151,7 @@ build-ghidra: 02-build-ghidra
 		echo "VMARGS=-Dapplication.settingsdir=\$${INSTALL_DIR}/portable/settings" >> $(INSTALL_DIR)/support/launch.properties; \
 		echo "VMARGS=-Dapplication.cachedir=\$${INSTALL_DIR}/portable/cache" >> $(INSTALL_DIR)/support/launch.properties; \
 		echo "VMARGS=-Dapplication.tempdir=\$${INSTALL_DIR}/portable/temp" >> $(INSTALL_DIR)/support/launch.properties; \
-		echo "\033[32mSuccessfully patched launch.properties.\033[0m"; \
+		printf '\033[32mSuccessfully patched launch.properties.\033[0m\n'; \
 	else \
 		echo "launch.properties already patched, skipping."; \
 	fi
@@ -174,12 +176,12 @@ MCP_EXT_DIR = $(INSTALL_DIR)/Ghidra/Extensions/GhidraMCP
 			exit 1; \
 		fi; \
 		echo "Installing $$MCP_ZIP into $(INSTALL_DIR)/Ghidra/Extensions/..."; \
-		unzip -q "$$MCP_ZIP" -d "$(INSTALL_DIR)/Ghidra/Extensions/"; \
+		unzip -q -o "$$MCP_ZIP" -d "$(INSTALL_DIR)/Ghidra/Extensions/"; \
 		if [ ! -d "$(MCP_EXT_DIR)" ]; then \
 			echo "ERROR: Expected $(MCP_EXT_DIR) after unzip"; \
 			exit 1; \
 		fi; \
-		echo "\033[32mGhidraMCP extension installed successfully.\033[0m"; \
+		printf '\033[32mGhidraMCP extension installed successfully.\033[0m\n'; \
 	fi
 
 install-mcp: 04-install-mcp
@@ -201,11 +203,11 @@ LX_LOADER_FALLBACK_URL = https://github.com/yetmorecode/ghidra-lx-loader/release
 				exit 1; \
 			fi; \
 			echo "Installing built lx-loader $$LX_ZIP..."; \
-			unzip -q "$$LX_ZIP" -d "$(INSTALL_DIR)/Ghidra/Extensions/"; \
+			unzip -q -o "$$LX_ZIP" -d "$(INSTALL_DIR)/Ghidra/Extensions/"; \
 		else \
-			echo "\033[33mWARNING: lx-loader buildExtension failed. Falling back to release zip...\033[0m"; \
+			printf '\033[33mWARNING: lx-loader buildExtension failed. Falling back to release zip...\033[0m\n'; \
 			curl -f -L -o lx-loader/fallback.zip "$(LX_LOADER_FALLBACK_URL)" || exit 1; \
-			unzip -q lx-loader/fallback.zip -d "$(INSTALL_DIR)/Ghidra/Extensions/"; \
+			unzip -q -o lx-loader/fallback.zip -d "$(INSTALL_DIR)/Ghidra/Extensions/"; \
 		fi; \
 		if [ -d "$(INSTALL_DIR)/Ghidra/Extensions/lx-loader" ] && [ ! -d "$(LX_LOADER_DIR)" ]; then \
 			mv "$(INSTALL_DIR)/Ghidra/Extensions/lx-loader" "$(LX_LOADER_DIR)"; \
@@ -214,7 +216,7 @@ LX_LOADER_FALLBACK_URL = https://github.com/yetmorecode/ghidra-lx-loader/release
 			echo "ERROR: Expected $(LX_LOADER_DIR) after unzip"; \
 			exit 1; \
 		fi; \
-		echo "\033[32mlx-loader extension installed successfully.\033[0m"; \
+		printf '\033[32mlx-loader extension installed successfully.\033[0m\n'; \
 	fi
 
 install-lx-loader: 05-install-lx-loader
@@ -243,7 +245,7 @@ DOS_TOOLBOX_DIR = $(INSTALL_DIR)/Ghidra/Extensions/GhidraDosToolbox
 			echo "ERROR: Expected $(DOS_TOOLBOX_DIR) after unzip"; \
 			exit 1; \
 		fi; \
-		echo "\033[32mGhidraDosToolbox extension installed successfully.\033[0m"; \
+		printf '\033[32mGhidraDosToolbox extension installed successfully.\033[0m\n'; \
 	fi
 
 install-dos-toolbox: 06-install-dos-toolbox
@@ -259,7 +261,7 @@ install-dos-toolbox: 06-install-dos-toolbox
 		"$(PIP)" install -U pip setuptools wheel || exit 1; \
 		echo "Installing bridge-mcp-ghidra in editable mode..."; \
 		"$(PIP)" install -e ./ghidra-mcp || exit 1; \
-		echo "\033[32mVirtual environment configured successfully.\033[0m"; \
+		printf '\033[32mVirtual environment configured successfully.\033[0m\n'; \
 	fi
 
 venv: 07-venv
@@ -270,10 +272,10 @@ OPENCODE_CONFIG = $(HOME)/.config/opencode/opencode.json
 
 08-register-mcp: 07-venv ## Register bridge-mcp-ghidra in ~/.config/opencode/opencode.json
 	@echo "Registering bridge-mcp-ghidra with opencode..."
-	@mkdir -p $(HOME)/.config/opencode
+	@mkdir -p "$$(dirname "$(OPENCODE_CONFIG)")"
 	@python3 -c '\
 import json, os, sys; \
-cfg_path = os.path.expanduser("~/.config/opencode/opencode.json"); \
+cfg_path = os.path.expanduser("$(OPENCODE_CONFIG)"); \
 bridge_bin = os.path.abspath("$(VENV_DIR)/bin/bridge-mcp-ghidra"); \
 if os.path.exists(cfg_path): \
     with open(cfg_path, "r", encoding="utf-8") as f: \
@@ -290,21 +292,21 @@ with open(cfg_path + ".tmp", "w", encoding="utf-8") as f: \
     json.dump(data, f, indent=2); \
 os.replace(cfg_path + ".tmp", cfg_path); \
 print("Registered ghidra MCP server in " + cfg_path)'
-	@echo "\033[32mMCP registration complete.\033[0m"
+	@printf '\033[32mMCP registration complete.\033[0m\n'
 
 register-mcp: 08-register-mcp
 
 # ── Pipeline & Runtime ────────────────────────────────────────────────────────
 
 install: 00-env 01-checkout 02-build-ghidra 03-install-ghidra 04-install-mcp 05-install-lx-loader 06-install-dos-toolbox 07-venv 08-register-mcp ## Run entire build and installation pipeline
-	@echo "\n\033[01;32m==============================================\033[00m"
-	@echo "\033[01;32m Ghidra Bundle installation completed!       \033[00m"
-	@echo "\033[01;32m Run 'make run' to launch Ghidra.            \033[00m"
-	@echo "\033[01;32m==============================================\033[00m\n"
+	@printf '\n\033[01;32m==============================================\033[00m\n'
+	@printf '\033[01;32m Ghidra Bundle installation completed!       \033[00m\n'
+	@printf '\033[01;32m Run '\''make run'\'' to launch Ghidra.            \033[00m\n'
+	@printf '\033[01;32m==============================================\033[00m\n\n'
 
 run: ## Launch isolated Ghidra instance (checks port 8089 collision)
 	@if lsof -i :8089 >/dev/null 2>&1; then \
-		echo "\033[31mERROR: Port 8089 is already bound by another process:\033[0m"; \
+		printf '\033[31mERROR: Port 8089 is already bound by another process:\033[0m\n'; \
 		lsof -i :8089; \
 		exit 1; \
 	fi
@@ -325,25 +327,24 @@ run-bridge: ## Start bridge-mcp-ghidra from the virtual environment
 verify: ## Check GhidraMCP plugin connection at http://127.0.0.1:8089
 	@echo "Testing GhidraMCP HTTP endpoint..."
 	@curl -s -f http://127.0.0.1:8089/check_connection || { \
-		echo "\n\033[31mCould not connect to GhidraMCP server on port 8089.\033[0m"; \
+		printf '\n\033[31mCould not connect to GhidraMCP server on port 8089.\033[0m\n'; \
 		echo "Ensure Ghidra is running with the GhidraMCP plugin enabled."; \
 		exit 1; \
 	}
-	@echo "\n\033[32mGhidraMCP connection verified.\033[0m"
+	@printf '\n\033[32mGhidraMCP connection verified.\033[0m\n'
 
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 
 clean: ## Remove build outputs (dist/, .venv/, repo target/dist artifacts)
 	@echo "Cleaning bundle build artifacts..."
 	@rm -rf $(DIST_DIR) $(VENV_DIR)
-	@rm -f lx-loader/fallback.zip
 	@if [ -d "ghidra" ]; then (cd ghidra && rm -rf build); fi
 	@if [ -d "ghidra-mcp" ]; then (cd ghidra-mcp && rm -rf target build); fi
 	@if [ -d "lx-loader" ]; then (cd lx-loader && rm -rf dist build .gradle fallback.zip); fi
 	@if [ -d "dos-toolbox" ]; then (cd dos-toolbox && rm -rf dist build .gradle); fi
-	@echo "\033[32mClean complete.\033[0m"
+	@printf '\033[32mClean complete.\033[0m\n'
 
 distclean: clean ## Remove build outputs and cloned checkouts
 	@echo "Removing cloned checkouts..."
 	@rm -rf ghidra ghidra-mcp lx-loader dos-toolbox
-	@echo "\033[32mDistclean complete.\033[0m"
+	@printf '\033[32mDistclean complete.\033[0m\n'
