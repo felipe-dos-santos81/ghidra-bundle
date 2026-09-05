@@ -11,18 +11,47 @@ SHELL := /bin/bash
 SERVICE = Ghidra Bundle
 
 # Directories
-BUNDLE_DIR := $(shell pwd)
+BUNDLE_DIR := $(CURDIR)
 DIST_DIR = $(BUNDLE_DIR)/dist
 INSTALL_DIR = $(DIST_DIR)/ghidra_12.1.2_PUBLIC
 PORTABLE_DIR = $(INSTALL_DIR)/portable
 VENV_DIR = $(BUNDLE_DIR)/.venv
 
 # Python environment
-PYTHON = $(VENV_DIR)/bin/python
 PIP = $(VENV_DIR)/bin/pip
+BRIDGE_BIN = $(VENV_DIR)/bin/bridge-mcp-ghidra
 
-# Java 21 resolution
-JAVA21_HOME := $(shell /usr/libexec/java_home -F -v 21 2>/dev/null)
+# Java 21 resolution and environment propagation
+JAVA21_HOME ?= $(shell /usr/libexec/java_home -F -v 21 2>/dev/null)
+export JAVA_HOME := $(JAVA21_HOME)
+export PATH := $(JAVA21_HOME)/bin:$(PATH)
+
+# Reusable Macros
+define clone_repo
+	@if [ ! -d "$(1)/.git" ]; then \
+		echo "Cloning $(1)..."; \
+		git clone --depth 1 $(if $(3),--branch $(3)) $(2) $(1); \
+	else \
+		echo "$(1)/ already exists, skipping."; \
+	fi
+endef
+
+define install_extension_zip
+	ZIP=$$(ls -1t $(1) 2>/dev/null | head -n 1); \
+	if [ -z "$$ZIP" ]; then \
+		echo "ERROR: Extension zip not found in $(1)"; \
+		exit 1; \
+	fi; \
+	echo "Installing $$ZIP into $(INSTALL_DIR)/Ghidra/Extensions/..."; \
+	unzip -q -o "$$ZIP" -d "$(INSTALL_DIR)/Ghidra/Extensions/"; \
+	if [ -n "$(3)" ] && [ -d "$(INSTALL_DIR)/Ghidra/Extensions/$(3)" ] && [ ! -d "$(2)" ]; then \
+		mv "$(INSTALL_DIR)/Ghidra/Extensions/$(3)" "$(2)"; \
+	fi; \
+	if [ ! -d "$(2)" ]; then \
+		echo "ERROR: Expected $(2) after unzip"; \
+		exit 1; \
+	fi
+endef
 
 .PHONY: help 00-env env \
         01-checkout checkout \
@@ -80,30 +109,10 @@ DOS_TOOLBOX_BRANCH = wip-ghidra-12
 
 01-checkout: ## Shallow clone the four upstream repositories
 	@echo "Checking out upstream repositories..."
-	@if [ ! -d "ghidra/.git" ]; then \
-		echo "Cloning Ghidra (tag $(GHIDRA_TAG))..."; \
-		git clone --depth 1 --branch $(GHIDRA_TAG) $(GHIDRA_REPO) ghidra; \
-	else \
-		echo "ghidra/ already exists, skipping."; \
-	fi
-	@if [ ! -d "ghidra-mcp/.git" ]; then \
-		echo "Cloning ghidra-mcp..."; \
-		git clone --depth 1 $(GHIDRA_MCP_REPO) ghidra-mcp; \
-	else \
-		echo "ghidra-mcp/ already exists, skipping."; \
-	fi
-	@if [ ! -d "lx-loader/.git" ]; then \
-		echo "Cloning ghidra-lx-loader..."; \
-		git clone --depth 1 $(LX_LOADER_REPO) lx-loader; \
-	else \
-		echo "lx-loader/ already exists, skipping."; \
-	fi
-	@if [ ! -d "dos-toolbox/.git" ]; then \
-		echo "Cloning GhidraDosToolbox (branch $(DOS_TOOLBOX_BRANCH))..."; \
-		git clone --depth 1 --branch $(DOS_TOOLBOX_BRANCH) $(DOS_TOOLBOX_REPO) dos-toolbox; \
-	else \
-		echo "dos-toolbox/ already exists, skipping."; \
-	fi
+	$(call clone_repo,ghidra,$(GHIDRA_REPO),$(GHIDRA_TAG))
+	$(call clone_repo,ghidra-mcp,$(GHIDRA_MCP_REPO))
+	$(call clone_repo,lx-loader,$(LX_LOADER_REPO))
+	$(call clone_repo,dos-toolbox,$(DOS_TOOLBOX_REPO),$(DOS_TOOLBOX_BRANCH))
 	@printf '\033[32mCheckout complete.\033[0m\n'
 
 checkout: 01-checkout
@@ -114,7 +123,7 @@ checkout: 01-checkout
 	@if compgen -G "ghidra/build/dist/ghidra_12.1.2_*.zip" > /dev/null; then \
 		echo "Ghidra distribution zip already exists in ghidra/build/dist/, skipping."; \
 	else \
-		JAVA_HOME="$(JAVA21_HOME)" ./build-ghidra.sh; \
+		./build-ghidra.sh; \
 	fi
 
 build-ghidra: 02-build-ghidra
@@ -122,38 +131,36 @@ build-ghidra: 02-build-ghidra
 # ── Stage 3: Install Ghidra ───────────────────────────────────────────────────
 
 03-install-ghidra: 02-build-ghidra ## Extract Ghidra into dist/ and configure portable mode
-	@if [ -d "$(INSTALL_DIR)" ] && [ -f "$(INSTALL_DIR)/support/launch.properties" ]; then \
-		echo "Ghidra install directory $(INSTALL_DIR) already exists, skipping extraction."; \
+	@if [ -d "$(INSTALL_DIR)" ] && [ -f "$(INSTALL_DIR)/support/launch.properties" ] && grep -q "^# --- Portable Mode Overrides ---" "$(INSTALL_DIR)/support/launch.properties"; then \
+		echo "Ghidra install directory $(INSTALL_DIR) already exists and configured, skipping."; \
 	else \
-		ZIP_FILE=$$(ls -1 ghidra/build/dist/ghidra_12.1.2_*.zip 2>/dev/null | head -n 1); \
+		ZIP_FILE=$$(ls -1t ghidra/build/dist/ghidra_12.1.2_*.zip 2>/dev/null | head -n 1); \
 		if [ -z "$$ZIP_FILE" ]; then \
 			echo "ERROR: No Ghidra zip found in ghidra/build/dist/"; \
 			exit 1; \
 		fi; \
 		echo "Extracting $$ZIP_FILE to $(DIST_DIR)..."; \
-		mkdir -p $(DIST_DIR); \
-		unzip -q -o "$$ZIP_FILE" -d $(DIST_DIR); \
+		mkdir -p "$(DIST_DIR)"; \
+		unzip -q -o "$$ZIP_FILE" -d "$(DIST_DIR)"; \
 		EXTRACTED_DIR=$$(ls -d $(DIST_DIR)/ghidra_12.1.2_* | head -n 1); \
 		if [ "$$EXTRACTED_DIR" != "$(INSTALL_DIR)" ]; then \
 			echo "Normalizing $$EXTRACTED_DIR to $(INSTALL_DIR)..."; \
-			rm -rf $(INSTALL_DIR); \
-			mv "$$EXTRACTED_DIR" $(INSTALL_DIR); \
+			rm -rf "$(INSTALL_DIR)"; \
+			mv "$$EXTRACTED_DIR" "$(INSTALL_DIR)"; \
 		fi; \
-	fi
-	@echo "Creating portable directories and extensions folder..."
-	@mkdir -p $(PORTABLE_DIR)/settings $(PORTABLE_DIR)/cache $(PORTABLE_DIR)/temp
-	@mkdir -p $(INSTALL_DIR)/Ghidra/Extensions
-	@echo "Patching $(INSTALL_DIR)/support/launch.properties for portable mode..."
-	@if ! grep -q "application.settingsdir" $(INSTALL_DIR)/support/launch.properties; then \
-		echo "" >> $(INSTALL_DIR)/support/launch.properties; \
-		echo "# --- Portable Mode Overrides ---" >> $(INSTALL_DIR)/support/launch.properties; \
-		echo "JAVA_HOME_OVERRIDE=$(JAVA21_HOME)" >> $(INSTALL_DIR)/support/launch.properties; \
-		echo "VMARGS=-Dapplication.settingsdir=\$${INSTALL_DIR}/portable/settings" >> $(INSTALL_DIR)/support/launch.properties; \
-		echo "VMARGS=-Dapplication.cachedir=\$${INSTALL_DIR}/portable/cache" >> $(INSTALL_DIR)/support/launch.properties; \
-		echo "VMARGS=-Dapplication.tempdir=\$${INSTALL_DIR}/portable/temp" >> $(INSTALL_DIR)/support/launch.properties; \
+		echo "Creating portable directories and extensions folder..."; \
+		mkdir -p "$(PORTABLE_DIR)/settings" "$(PORTABLE_DIR)/cache" "$(PORTABLE_DIR)/temp"; \
+		mkdir -p "$(INSTALL_DIR)/Ghidra/Extensions"; \
+		echo "Patching $(INSTALL_DIR)/support/launch.properties for portable mode..."; \
+		{ \
+			echo ""; \
+			echo "# --- Portable Mode Overrides ---"; \
+			echo "JAVA_HOME_OVERRIDE=$(JAVA21_HOME)"; \
+			echo "VMARGS=-Dapplication.settingsdir=\$${INSTALL_DIR}/portable/settings"; \
+			echo "VMARGS=-Dapplication.cachedir=\$${INSTALL_DIR}/portable/cache"; \
+			echo "VMARGS=-Dapplication.tempdir=\$${INSTALL_DIR}/portable/temp"; \
+		} >> "$(INSTALL_DIR)/support/launch.properties"; \
 		printf '\033[32mSuccessfully patched launch.properties.\033[0m\n'; \
-	else \
-		echo "launch.properties already patched, skipping."; \
 	fi
 
 install-ghidra: 03-install-ghidra
@@ -167,20 +174,10 @@ MCP_EXT_DIR = $(INSTALL_DIR)/Ghidra/Extensions/GhidraMCP
 		echo "GhidraMCP extension already installed at $(MCP_EXT_DIR), skipping."; \
 	else \
 		echo "Preparing Ghidra JAR dependencies for Maven..."; \
-		(cd ghidra-mcp && JAVA_HOME="$(JAVA21_HOME)" python3 -m tools.setup install-ghidra-deps --ghidra-path "$(INSTALL_DIR)") || exit 1; \
+		(cd ghidra-mcp && python3 -m tools.setup install-ghidra-deps --ghidra-path "$(INSTALL_DIR)") || exit 1; \
 		echo "Building GhidraMCP extension package..."; \
-		(cd ghidra-mcp && JAVA_HOME="$(JAVA21_HOME)" python3 -m tools.setup build) || exit 1; \
-		MCP_ZIP=$$(ls -1t ghidra-mcp/target/GhidraMCP-*.zip 2>/dev/null | head -n 1); \
-		if [ -z "$$MCP_ZIP" ]; then \
-			echo "ERROR: GhidraMCP zip not found in ghidra-mcp/target/"; \
-			exit 1; \
-		fi; \
-		echo "Installing $$MCP_ZIP into $(INSTALL_DIR)/Ghidra/Extensions/..."; \
-		unzip -q -o "$$MCP_ZIP" -d "$(INSTALL_DIR)/Ghidra/Extensions/"; \
-		if [ ! -d "$(MCP_EXT_DIR)" ]; then \
-			echo "ERROR: Expected $(MCP_EXT_DIR) after unzip"; \
-			exit 1; \
-		fi; \
+		(cd ghidra-mcp && python3 -m tools.setup build) || exit 1; \
+		$(call install_extension_zip,ghidra-mcp/target/GhidraMCP-*.zip,$(MCP_EXT_DIR)); \
 		printf '\033[32mGhidraMCP extension installed successfully.\033[0m\n'; \
 	fi
 
@@ -196,25 +193,12 @@ LX_LOADER_FALLBACK_URL = https://github.com/yetmorecode/ghidra-lx-loader/release
 		echo "lx-loader extension already installed at $(LX_LOADER_DIR), skipping."; \
 	else \
 		echo "Building lx-loader extension using ghidra Gradle wrapper..."; \
-		if (cd lx-loader && JAVA_HOME="$(JAVA21_HOME)" ../ghidra/gradlew -p . -PGHIDRA_INSTALL_DIR="$(INSTALL_DIR)" buildExtension); then \
-			LX_ZIP=$$(ls -1t lx-loader/dist/*.zip 2>/dev/null | head -n 1); \
-			if [ -z "$$LX_ZIP" ]; then \
-				echo "ERROR: lx-loader zip not found in lx-loader/dist/"; \
-				exit 1; \
-			fi; \
-			echo "Installing built lx-loader $$LX_ZIP..."; \
-			unzip -q -o "$$LX_ZIP" -d "$(INSTALL_DIR)/Ghidra/Extensions/"; \
+		if (cd lx-loader && ../ghidra/gradlew -p . -PGHIDRA_INSTALL_DIR="$(INSTALL_DIR)" buildExtension); then \
+			$(call install_extension_zip,lx-loader/dist/*.zip,$(LX_LOADER_DIR),lx-loader); \
 		else \
 			printf '\033[33mWARNING: lx-loader buildExtension failed. Falling back to release zip...\033[0m\n'; \
 			curl -f -L -o lx-loader/fallback.zip "$(LX_LOADER_FALLBACK_URL)" || exit 1; \
-			unzip -q -o lx-loader/fallback.zip -d "$(INSTALL_DIR)/Ghidra/Extensions/"; \
-		fi; \
-		if [ -d "$(INSTALL_DIR)/Ghidra/Extensions/lx-loader" ] && [ ! -d "$(LX_LOADER_DIR)" ]; then \
-			mv "$(INSTALL_DIR)/Ghidra/Extensions/lx-loader" "$(LX_LOADER_DIR)"; \
-		fi; \
-		if [ ! -d "$(LX_LOADER_DIR)" ]; then \
-			echo "ERROR: Expected $(LX_LOADER_DIR) after unzip"; \
-			exit 1; \
+			$(call install_extension_zip,lx-loader/fallback.zip,$(LX_LOADER_DIR),lx-loader); \
 		fi; \
 		printf '\033[32mlx-loader extension installed successfully.\033[0m\n'; \
 	fi
@@ -230,21 +214,8 @@ DOS_TOOLBOX_DIR = $(INSTALL_DIR)/Ghidra/Extensions/GhidraDosToolbox
 		echo "GhidraDosToolbox extension already installed at $(DOS_TOOLBOX_DIR), skipping."; \
 	else \
 		echo "Building GhidraDosToolbox extension using ghidra Gradle wrapper..."; \
-		(cd dos-toolbox && JAVA_HOME="$(JAVA21_HOME)" ../ghidra/gradlew -p . -PGHIDRA_INSTALL_DIR="$(INSTALL_DIR)" buildExtension) || exit 1; \
-		DOS_ZIP=$$(ls -1t dos-toolbox/dist/*.zip 2>/dev/null | head -n 1); \
-		if [ -z "$$DOS_ZIP" ]; then \
-			echo "ERROR: GhidraDosToolbox zip not found in dos-toolbox/dist/"; \
-			exit 1; \
-		fi; \
-		echo "Installing $$DOS_ZIP into $(INSTALL_DIR)/Ghidra/Extensions/..."; \
-		unzip -q -o "$$DOS_ZIP" -d "$(INSTALL_DIR)/Ghidra/Extensions/"; \
-		if [ -d "$(INSTALL_DIR)/Ghidra/Extensions/dos-toolbox" ] && [ ! -d "$(DOS_TOOLBOX_DIR)" ]; then \
-			mv "$(INSTALL_DIR)/Ghidra/Extensions/dos-toolbox" "$(DOS_TOOLBOX_DIR)"; \
-		fi; \
-		if [ ! -d "$(DOS_TOOLBOX_DIR)" ]; then \
-			echo "ERROR: Expected $(DOS_TOOLBOX_DIR) after unzip"; \
-			exit 1; \
-		fi; \
+		(cd dos-toolbox && ../ghidra/gradlew -p . -PGHIDRA_INSTALL_DIR="$(INSTALL_DIR)" buildExtension) || exit 1; \
+		$(call install_extension_zip,dos-toolbox/dist/*.zip,$(DOS_TOOLBOX_DIR),dos-toolbox); \
 		printf '\033[32mGhidraDosToolbox extension installed successfully.\033[0m\n'; \
 	fi
 
@@ -253,12 +224,11 @@ install-dos-toolbox: 06-install-dos-toolbox
 # ── Stage 7: Python Virtualenv ────────────────────────────────────────────────
 
 07-venv: 01-checkout ## Create Python venv and install bridge-mcp-ghidra
-	@if [ -d "$(VENV_DIR)" ] && [ -x "$(VENV_DIR)/bin/bridge-mcp-ghidra" ]; then \
+	@if [ -d "$(VENV_DIR)" ] && [ -x "$(BRIDGE_BIN)" ]; then \
 		echo "Virtual environment already configured at $(VENV_DIR), skipping."; \
 	else \
 		echo "Creating virtual environment at $(VENV_DIR)..."; \
 		python3 -m venv "$(VENV_DIR)" || exit 1; \
-		"$(PIP)" install -U pip setuptools wheel || exit 1; \
 		echo "Installing bridge-mcp-ghidra in editable mode..."; \
 		"$(PIP)" install -e ./ghidra-mcp || exit 1; \
 		printf '\033[32mVirtual environment configured successfully.\033[0m\n'; \
@@ -274,24 +244,25 @@ OPENCODE_CONFIG = $(HOME)/.config/opencode/opencode.json
 	@echo "Registering bridge-mcp-ghidra with opencode..."
 	@mkdir -p "$$(dirname "$(OPENCODE_CONFIG)")"
 	@python3 -c '\
-import json, os, sys; \
+import json, os; \
 cfg_path = os.path.expanduser("$(OPENCODE_CONFIG)"); \
-bridge_bin = os.path.abspath("$(VENV_DIR)/bin/bridge-mcp-ghidra"); \
+bridge_bin = os.path.abspath("$(BRIDGE_BIN)"); \
+data = None; \
 if os.path.exists(cfg_path): \
     with open(cfg_path, "r", encoding="utf-8") as f: \
         try: data = json.load(f) \
-        except Exception: data = {} \
-else: \
+        except Exception: pass; \
+if data is None: \
     data = {"$$schema": "https://opencode.ai/config.json"}; \
-data.setdefault("mcp", {})["ghidra"] = { \
-    "type": "local", \
-    "command": [bridge_bin], \
-    "enabled": True \
-}; \
-with open(cfg_path + ".tmp", "w", encoding="utf-8") as f: \
-    json.dump(data, f, indent=2); \
-os.replace(cfg_path + ".tmp", cfg_path); \
-print("Registered ghidra MCP server in " + cfg_path)'
+entry = {"type": "local", "command": [bridge_bin], "enabled": True}; \
+if data.get("mcp", {}).get("ghidra") == entry: \
+    print("Ghidra MCP server already registered in " + cfg_path); \
+else: \
+    data.setdefault("mcp", {})["ghidra"] = entry; \
+    with open(cfg_path + ".tmp", "w", encoding="utf-8") as f: \
+        json.dump(data, f, indent=2); \
+    os.replace(cfg_path + ".tmp", cfg_path); \
+    print("Registered ghidra MCP server in " + cfg_path)'
 	@printf '\033[32mMCP registration complete.\033[0m\n'
 
 register-mcp: 08-register-mcp
@@ -318,11 +289,11 @@ run: ## Launch isolated Ghidra instance (checks port 8089 collision)
 	@"$(INSTALL_DIR)/ghidraRun"
 
 run-bridge: ## Start bridge-mcp-ghidra from the virtual environment
-	@if [ ! -x "$(VENV_DIR)/bin/bridge-mcp-ghidra" ]; then \
-		echo "ERROR: $(VENV_DIR)/bin/bridge-mcp-ghidra not found. Run 'make venv' first."; \
+	@if [ ! -x "$(BRIDGE_BIN)" ]; then \
+		echo "ERROR: $(BRIDGE_BIN) not found. Run 'make venv' first."; \
 		exit 1; \
 	fi
-	@"$(VENV_DIR)/bin/bridge-mcp-ghidra"
+	@"$(BRIDGE_BIN)"
 
 verify: ## Check GhidraMCP plugin connection at http://127.0.0.1:8089
 	@echo "Testing GhidraMCP HTTP endpoint..."
@@ -337,11 +308,11 @@ verify: ## Check GhidraMCP plugin connection at http://127.0.0.1:8089
 
 clean: ## Remove build outputs (dist/, .venv/, repo target/dist artifacts)
 	@echo "Cleaning bundle build artifacts..."
-	@rm -rf $(DIST_DIR) $(VENV_DIR)
-	@if [ -d "ghidra" ]; then (cd ghidra && rm -rf build); fi
-	@if [ -d "ghidra-mcp" ]; then (cd ghidra-mcp && rm -rf target build); fi
-	@if [ -d "lx-loader" ]; then (cd lx-loader && rm -rf dist build .gradle fallback.zip); fi
-	@if [ -d "dos-toolbox" ]; then (cd dos-toolbox && rm -rf dist build .gradle); fi
+	@rm -rf $(DIST_DIR) $(VENV_DIR) \
+		ghidra/build \
+		ghidra-mcp/target ghidra-mcp/build \
+		lx-loader/dist lx-loader/build lx-loader/.gradle lx-loader/fallback.zip \
+		dos-toolbox/dist dos-toolbox/build dos-toolbox/.gradle
 	@printf '\033[32mClean complete.\033[0m\n'
 
 distclean: clean ## Remove build outputs and cloned checkouts

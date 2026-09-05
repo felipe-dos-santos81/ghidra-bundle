@@ -11,9 +11,7 @@ fi
 
 cd "$GHIDRA_SRC_DIR"
 
-if [[ -z "${JAVA_HOME:-}" ]]; then
-  JAVA_HOME="$(/usr/libexec/java_home -F -v 21 2>/dev/null)"
-fi
+JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -F -v 21 2>/dev/null || true)}"
 export JAVA_HOME
 
 if [[ -z "$JAVA_HOME" || ! -d "$JAVA_HOME" ]]; then
@@ -30,7 +28,7 @@ if [[ ! -x "./gradlew" ]]; then
   exit 1
 fi
 
-if [[ ! -d "dependencies" ]]; then
+if [[ ! -d "dependencies/flatRepo" ]]; then
   echo "Fetching Ghidra build dependencies..."
   ./gradlew -I gradle/support/fetchDependencies.gradle
 fi
