@@ -219,3 +219,32 @@ LX_LOADER_FALLBACK_URL = https://github.com/yetmorecode/ghidra-lx-loader/release
 
 install-lx-loader: 05-install-lx-loader
 
+# ── Stage 6: Install GhidraDosToolbox Extension ───────────────────────────────
+
+DOS_TOOLBOX_DIR = $(INSTALL_DIR)/Ghidra/Extensions/GhidraDosToolbox
+
+06-install-dos-toolbox: 03-install-ghidra ## Build GhidraDosToolbox extension using ghidra/gradlew
+	@if [ -d "$(DOS_TOOLBOX_DIR)" ]; then \
+		echo "GhidraDosToolbox extension already installed at $(DOS_TOOLBOX_DIR), skipping."; \
+	else \
+		echo "Building GhidraDosToolbox extension using ghidra Gradle wrapper..."; \
+		(cd dos-toolbox && JAVA_HOME="$(JAVA21_HOME)" ../ghidra/gradlew -p . -PGHIDRA_INSTALL_DIR="$(INSTALL_DIR)" buildExtension) || exit 1; \
+		DOS_ZIP=$$(ls -1t dos-toolbox/dist/*.zip 2>/dev/null | head -n 1); \
+		if [ -z "$$DOS_ZIP" ]; then \
+			echo "ERROR: GhidraDosToolbox zip not found in dos-toolbox/dist/"; \
+			exit 1; \
+		fi; \
+		echo "Installing $$DOS_ZIP into $(INSTALL_DIR)/Ghidra/Extensions/..."; \
+		unzip -q -o "$$DOS_ZIP" -d "$(INSTALL_DIR)/Ghidra/Extensions/"; \
+		if [ -d "$(INSTALL_DIR)/Ghidra/Extensions/dos-toolbox" ] && [ ! -d "$(DOS_TOOLBOX_DIR)" ]; then \
+			mv "$(INSTALL_DIR)/Ghidra/Extensions/dos-toolbox" "$(DOS_TOOLBOX_DIR)"; \
+		fi; \
+		if [ ! -d "$(DOS_TOOLBOX_DIR)" ]; then \
+			echo "ERROR: Expected $(DOS_TOOLBOX_DIR) after unzip"; \
+			exit 1; \
+		fi; \
+		echo "\033[32mGhidraDosToolbox extension installed successfully.\033[0m"; \
+	fi
+
+install-dos-toolbox: 06-install-dos-toolbox
+
