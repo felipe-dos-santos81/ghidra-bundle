@@ -156,4 +156,30 @@ build-ghidra: 02-build-ghidra
 
 install-ghidra: 03-install-ghidra
 
+# ── Stage 4: Install GhidraMCP Extension ──────────────────────────────────────
 
+MCP_EXT_DIR = $(INSTALL_DIR)/Ghidra/Extensions/GhidraMCP
+
+04-install-mcp: 03-install-ghidra ## Build GhidraMCP extension and install to Ghidra/Extensions/
+	@if [ -d "$(MCP_EXT_DIR)" ]; then \
+		echo "GhidraMCP extension already installed at $(MCP_EXT_DIR), skipping."; \
+	else \
+		echo "Preparing Ghidra JAR dependencies for Maven..."; \
+		(cd ghidra-mcp && JAVA_HOME="$(JAVA21_HOME)" python3 -m tools.setup install-ghidra-deps --ghidra-path $(INSTALL_DIR)); \
+		echo "Building GhidraMCP extension package..."; \
+		(cd ghidra-mcp && JAVA_HOME="$(JAVA21_HOME)" python3 -m tools.setup build); \
+		MCP_ZIP=$$(ls -1 ghidra-mcp/target/GhidraMCP-*.zip 2>/dev/null | head -n 1); \
+		if [ -z "$$MCP_ZIP" ]; then \
+			echo "ERROR: GhidraMCP zip not found in ghidra-mcp/target/"; \
+			exit 1; \
+		fi; \
+		echo "Installing $$MCP_ZIP into $(INSTALL_DIR)/Ghidra/Extensions/..."; \
+		unzip -q "$$MCP_ZIP" -d $(INSTALL_DIR)/Ghidra/Extensions/; \
+		if [ ! -d "$(MCP_EXT_DIR)" ]; then \
+			echo "ERROR: Expected $(MCP_EXT_DIR) after unzip"; \
+			exit 1; \
+		fi; \
+		echo "\033[32mGhidraMCP extension installed successfully.\033[0m"; \
+	fi
+
+install-mcp: 04-install-mcp
