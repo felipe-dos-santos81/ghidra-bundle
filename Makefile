@@ -248,3 +248,18 @@ DOS_TOOLBOX_DIR = $(INSTALL_DIR)/Ghidra/Extensions/GhidraDosToolbox
 
 install-dos-toolbox: 06-install-dos-toolbox
 
+# ── Stage 7: Python Virtualenv ────────────────────────────────────────────────
+
+07-venv: 01-checkout ## Create Python venv and install bridge-mcp-ghidra
+	@if [ -d "$(VENV_DIR)" ] && [ -x "$(VENV_DIR)/bin/bridge-mcp-ghidra" ]; then \
+		echo "Virtual environment already configured at $(VENV_DIR), skipping."; \
+	else \
+		echo "Creating virtual environment at $(VENV_DIR)..."; \
+		python3 -m venv "$(VENV_DIR)" || exit 1; \
+		"$(PIP)" install -U pip setuptools wheel || exit 1; \
+		echo "Installing bridge-mcp-ghidra in editable mode..."; \
+		"$(PIP)" install -e ./ghidra-mcp || exit 1; \
+		echo "\033[32mVirtual environment configured successfully.\033[0m"; \
+	fi
+
+venv: 07-venv
