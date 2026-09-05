@@ -8,7 +8,10 @@
 Create a self-contained Ghidra bundle under `ghidra-bundle/` that is built from
 source, easy to run, and fully isolated from any other Ghidra installs on the
 machine ("Preview installs"). The bundle includes the NSA Ghidra framework, the
-`ghidra-mcp` extension + Python bridge, and the `ghidra-lx-loader` extension.
+`ghidra-mcp` extension + Python bridge, the `ghidra-lx-loader` extension (for 32-bit
+DOS-extended LX/LE executables), and the `GhidraDosToolbox` extension (for 16-bit
+real-mode DOS MZ binaries, DOS syscall/interrupt resolution, Watcom calling
+conventions, and DOS data type archives).
 A single `Makefile` is the primary interface, styled after the reference
 `~/Downloads/Makefile` (numbered stage targets, `.NOTPARALLEL:` ordering, `make help` via grep,
 venv-driven `$(PYTHON)`/`$(PIP)` variables, `clean`).
@@ -22,6 +25,7 @@ venv-driven `$(PYTHON)`/`$(PIP)` variables, `clean`).
 | Release layout | Normalize build output to `ghidra_12.1.2_PUBLIC` | Upstream tag defaults to `application.release.name=DEV`; normalizing to `ghidra_12.1.2_PUBLIC` keeps predictable paths |
 | Extension path | Install into `<install>/Ghidra/Extensions/` | Ghidra's `GhidraApplicationLayout` only scans `Ghidra/Extensions` and user settings for installed extensions |
 | lx-loader build | Build using `ghidra/gradlew` + JDK 21 | Avoids host Gradle mismatches (e.g. system Gradle 9.7+ on JDK 26) by reusing Ghidra's verified wrapper |
+| dos-toolbox build | Build `GhidraDosToolbox` (Ghidra 12 branch) via `ghidra/gradlew` + JDK 21 | Upstream `main` was built for Ghidra 10; the `plaes/GhidraDosToolbox` `wip-ghidra-12` branch ports `DosLoader` to Ghidra 12 `ImporterSettings` API |
 | Isolation | Full: user data, MCP ports, Java toolchain, all under bundle | Requested explicitly |
 | MCP client | Auto-register bridge in opencode config | Requested explicitly |
 
@@ -33,12 +37,13 @@ ghidra-bundle/
 ├── build-ghidra.sh       # updated: pins 12.1.2 tag, JDK 21, gradle wrapper
 ├── ghidra/               # NSA source, shallow clone of Ghidra_12.1.2_build
 ├── ghidra-mcp/           # bethington/ghidra-mcp
-├── lx-loader/            # yetmorecode/ghidra-lx-loader
+├── lx-loader/            # yetmorecode/ghidra-lx-loader (32-bit LX/LE)
+├── dos-toolbox/          # plaes/GhidraDosToolbox (16-bit real-mode DOS)
 ├── dist/                 # build output + extracted install
 │   └── ghidra_12.1.2_PUBLIC/          # normalized runnable install
 │       ├── portable/                  # isolated user data (settings/cache/temp)
 │       └── Ghidra/
-│           └── Extensions/            # GhidraMCP/ + lx-loader/ (install-level)
+│           └── Extensions/            # GhidraMCP/ + lx-loader/ + GhidraDosToolbox/
 └── .venv/                # Python deps (bridge-mcp-ghidra)
 ```
 
@@ -72,11 +77,12 @@ nothing is written to `~/Library/ghidra` or the user's `$HOME`.
 ### 3. Extensions (install-level, auto-loaded)
 
 In Ghidra 12.x distributions, `GhidraApplicationLayout` scans
-`<install>/Ghidra/Extensions/` for install-level extensions. Both extensions are
-built and unzipped into `dist/ghidra_12.1.2_PUBLIC/Ghidra/Extensions/`:
+`<install>/Ghidra/Extensions/` for install-level extensions. All three extensions
+are built and unzipped into `dist/ghidra_12.1.2_PUBLIC/Ghidra/Extensions/`:
 
 - `GhidraMCP/` — from `ghidra-mcp` Maven build output (`target/GhidraMCP-*.zip`)
 - `lx-loader/` — from `lx-loader` build output (`dist/*.zip`)
+- `GhidraDosToolbox/` — from `dos-toolbox` build output (`dist/*.zip`)
 
 `ghidra-mcp`'s `tools.setup deploy` step (which writes to the user-profile
 `~/Library/ghidra/.../Extensions/`) is bypassed. We use `tools.setup
@@ -93,10 +99,11 @@ local `mcp` server entry to `~/.config/opencode/opencode.json` pointing at
 
 ## Build Flow
 
-1. **Checkout:** shallow-clone (`--depth 1`) the three repos:
+1. **Checkout:** shallow-clone (`--depth 1`) the four repos:
    - `ghidra`: `https://github.com/NationalSecurityAgency/ghidra.git` at tag `Ghidra_12.1.2_build`
    - `ghidra-mcp`: `https://github.com/bethington/ghidra-mcp.git`
    - `lx-loader`: `https://github.com/yetmorecode/ghidra-lx-loader.git` into `lx-loader/`
+   - `dos-toolbox`: `https://github.com/plaes/GhidraDosToolbox.git` (branch `wip-ghidra-12`) into `dos-toolbox/`
 2. **Build Ghidra:** from `ghidra/`, `./gradlew -I gradle/support/fetchDependencies.gradle`
    then `./gradlew buildGhidra`. Wrapped by updated `build-ghidra.sh`; JDK 21
    exported. Output lands in `ghidra/build/dist/ghidra_12.1.2_*.zip`.
@@ -113,9 +120,12 @@ local `mcp` server entry to `~/.config/opencode/opencode.json` pointing at
    Unzip the resulting `dist/*.zip` into `<install>/Ghidra/Extensions/`.
    - **Fallback:** If buildExtension fails, fall back to installing the v12.0.1
      release zip into `<install>/Ghidra/Extensions/`.
-6. **Venv:** `python3 -m venv .venv && .venv/bin/pip install -e ./ghidra-mcp`
+6. **dos-toolbox:** from `dos-toolbox/`, run:
+   `JAVA_HOME=$(JAVA21_HOME) ../ghidra/gradlew -p . -PGHIDRA_INSTALL_DIR=<install> buildExtension`.
+   Unzip the resulting `dist/*.zip` into `<install>/Ghidra/Extensions/`.
+7. **Venv:** `python3 -m venv .venv && .venv/bin/pip install -e ./ghidra-mcp`
    (installs the `bridge-mcp-ghidra` entry point).
-7. **Register:** safely update `~/.config/opencode/opencode.json` with the MCP
+8. **Register:** safely update `~/.config/opencode/opencode.json` with the MCP
    entry for `ghidra` pointing to `.venv/bin/bridge-mcp-ghidra`.
 
 ## Makefile Targets
@@ -126,14 +136,15 @@ targets and user-friendly aliases:
 ```
 make / make help       → print target summary
 00-env / env           → validate prerequisites (JDK 21, Maven, Clang, Python 3, uv, git)
-01-checkout / checkout → shallow clone the three repos
+01-checkout / checkout → shallow clone the four repos
 02-build-ghidra / build-ghidra → build Ghidra 12.1.2 via build-ghidra.sh
 03-install-ghidra / install-ghidra → extract dist/, normalize folder, patch launch.properties
 04-install-mcp / install-mcp → build GhidraMCP extension + place into Ghidra/Extensions/
 05-install-lx-loader / install-lx-loader → build lx-loader with ghidra/gradlew + place into Ghidra/Extensions/
-06-venv / venv         → create .venv + pip install -e ./ghidra-mcp
-07-register-mcp / register-mcp → write opencode mcp config entry
-install                → run pipeline stages 00 through 07 in order
+06-install-dos-toolbox / install-dos-toolbox → build GhidraDosToolbox with ghidra/gradlew + place into Ghidra/Extensions/
+07-venv / venv         → create .venv + pip install -e ./ghidra-mcp
+08-register-mcp / register-mcp → write opencode mcp config entry
+install                → run pipeline stages 00 through 08 in order
 run                    → launch isolated Ghidra (pre-check port 8089)
 run-bridge             → run bridge-mcp-ghidra from .venv (stdio or testing)
 verify                 → curl http://127.0.0.1:8089/check_connection
@@ -149,7 +160,9 @@ reference Makefile pattern.
 `make install` completes without error; `make run` opens Ghidra; in the
 CodeBrowser enable the GhidraMCP plugin and start the MCP server; `make verify`
 returns `Connected: GhidraMCP plugin running with program '<name>'` (or `no program loaded`);
-the lx-loader appears under File > Import File for LX/LE binaries. The bundle leaves
+the lx-loader appears under File > Import File for LX/LE binaries; DosSyscallAnalyzer
+appears under Analysis Options for x86 16-bit binaries; and the DOS data type
+archive (`dos_vs6_16.gdt`) is available in the Data Type Manager. The bundle leaves
 no artifacts in `~/Library/ghidra`.
 
 ## Out of Scope

@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build an isolated, self-contained Ghidra 12.1.2 bundle featuring the Ghidra framework, GhidraMCP extension, Python bridge, and lx-loader extension, managed through a stage-numbered Makefile.
+**Goal:** Build an isolated, self-contained Ghidra 12.1.2 bundle featuring the Ghidra framework, GhidraMCP extension, Python bridge, lx-loader extension (32-bit DOS-extended / OS/2), and GhidraDosToolbox extension (16-bit real-mode DOS), managed through a stage-numbered Makefile.
 
 **Architecture:** A root `Makefile` orchestrates numbered stages: environment validation, shallow repository checkouts, source build via Ghidra's Gradle wrapper and JDK 21, portable installation patching (`support/launch.properties`), extension builds placed into `<install>/Ghidra/Extensions/`, Python virtual environment creation with `bridge-mcp-ghidra`, and local MCP registration in `~/.config/opencode/opencode.json`.
 
-**Tech Stack:** GNU Make, Bash, JDK 21 (Temurin / OpenJDK), Gradle (pinned 9.4.1 wrapper), Apache Maven, Python 3.10+, uv, Git, Ghidra 12.1.2, GhidraMCP, Ghidra LX Loader.
+**Tech Stack:** GNU Make, Bash, JDK 21 (Temurin / OpenJDK), Gradle (pinned 9.4.1 wrapper), Apache Maven, Python 3.10+, uv, Git, Ghidra 12.1.2, GhidraMCP, Ghidra LX Loader, GhidraDosToolbox.
 
 **Spec:** [docs/superpowers/specs/2026-09-05-ghidra-bundle-design.md](file:///Users/felipe.dos.santos/code/mine/ghidra-bundle/docs/superpowers/specs/2026-09-05-ghidra-bundle-design.md)
 
@@ -64,7 +64,8 @@ Write `Makefile`:
 # Makefile for Ghidra Bundle
 # Targets are numbered by pipeline stage:
 #   00-env → 01-checkout → 02-build-ghidra → 03-install-ghidra →
-#   04-install-mcp → 05-install-lx-loader → 06-venv → 07-register-mcp
+#   04-install-mcp → 05-install-lx-loader → 06-install-dos-toolbox →
+#   07-venv → 08-register-mcp
 
 .NOTPARALLEL:
 
@@ -90,8 +91,9 @@ JAVA21_HOME := $(shell /usr/libexec/java_home -v 21 2>/dev/null)
         03-install-ghidra install-ghidra \
         04-install-mcp install-mcp \
         05-install-lx-loader install-lx-loader \
-        06-venv venv \
-        07-register-mcp register-mcp \
+        06-install-dos-toolbox install-dos-toolbox \
+        07-venv venv \
+        08-register-mcp register-mcp \
         install run run-bridge verify clean distclean
 
 # ── Help ──────────────────────────────────────────────────────────────────────
@@ -157,16 +159,17 @@ git commit -m "feat: add base Makefile with help and 00-env target"
 
 **Interfaces:**
 - Consumes: Git on host
-- Produces: `ghidra/`, `ghidra-mcp/`, and `lx-loader/` shallow clones pinned to tags/branches
+- Produces: `ghidra/`, `ghidra-mcp/`, `lx-loader/`, and `dos-toolbox/` shallow clones pinned to tags/branches
 
 - [ ] **Step 1: Add checkouts and build outputs to `.gitignore`**
 
-Create or update `.gitignore`:
+Update `.gitignore`:
 ```gitignore
 # Checkouts
 ghidra/
 ghidra-mcp/
 lx-loader/
+dos-toolbox/
 
 # Bundle build and runtime artifacts
 dist/
@@ -187,8 +190,10 @@ GHIDRA_TAG = Ghidra_12.1.2_build
 GHIDRA_REPO = https://github.com/NationalSecurityAgency/ghidra.git
 GHIDRA_MCP_REPO = https://github.com/bethington/ghidra-mcp.git
 LX_LOADER_REPO = https://github.com/yetmorecode/ghidra-lx-loader.git
+DOS_TOOLBOX_REPO = https://github.com/plaes/GhidraDosToolbox.git
+DOS_TOOLBOX_BRANCH = wip-ghidra-12
 
-01-checkout: ## Shallow clone the three upstream repositories
+01-checkout: ## Shallow clone the four upstream repositories
 	@echo "Checking out upstream repositories..."
 	@if [ ! -d "ghidra" ]; then \
 		echo "Cloning Ghidra (tag $(GHIDRA_TAG))..."; \
@@ -208,24 +213,30 @@ LX_LOADER_REPO = https://github.com/yetmorecode/ghidra-lx-loader.git
 	else \
 		echo "lx-loader/ already exists, skipping."; \
 	fi
+	@if [ ! -d "dos-toolbox" ]; then \
+		echo "Cloning GhidraDosToolbox (branch $(DOS_TOOLBOX_BRANCH))..."; \
+		git clone --depth 1 --branch $(DOS_TOOLBOX_BRANCH) $(DOS_TOOLBOX_REPO) dos-toolbox; \
+	else \
+		echo "dos-toolbox/ already exists, skipping."; \
+	fi
 	@echo "\033[32mCheckout complete.\033[0m"
 
 checkout: 01-checkout
 ```
 
-- [ ] **Step 3: Test `make 01-checkout`**
+- [ ] **Step 3: Test `make checkout`**
 
 Run:
 ```bash
 make checkout
 ```
-Expected: Three directories `ghidra`, `ghidra-mcp`, `lx-loader` cloned. Re-running `make checkout` prints `already exists, skipping.`
+Expected: Four directories `ghidra`, `ghidra-mcp`, `lx-loader`, `dos-toolbox` cloned. Re-running `make checkout` prints `already exists, skipping.`
 
 - [ ] **Step 4: Commit**
 
 ```bash
 git add Makefile .gitignore
-git commit -m "feat: add 01-checkout target with shallow clone support"
+git commit -m "feat: add 01-checkout target with dos-toolbox shallow clone"
 ```
 
 ---
@@ -548,7 +559,64 @@ git commit -m "feat: add 05-install-lx-loader target with ghidra wrapper and fal
 
 ---
 
-### Task 7: Python Bridge Virtualenv (`06-venv`)
+### Task 7: GhidraDosToolbox Extension Build & Placement (`06-install-dos-toolbox`)
+
+**Files:**
+- Modify: `Makefile`
+
+**Interfaces:**
+- Consumes: `dos-toolbox/`, `ghidra/gradlew`, `dist/ghidra_12.1.2_PUBLIC/`, `JAVA21_HOME`
+- Produces: `dist/ghidra_12.1.2_PUBLIC/Ghidra/Extensions/GhidraDosToolbox/`
+
+- [ ] **Step 1: Add `06-install-dos-toolbox` and `install-dos-toolbox` target to `Makefile`**
+
+Append to `Makefile`:
+```makefile
+# ── Stage 6: Install GhidraDosToolbox Extension ───────────────────────────────
+
+DOS_TOOLBOX_DIR = $(INSTALL_DIR)/Ghidra/Extensions/GhidraDosToolbox
+
+06-install-dos-toolbox: 03-install-ghidra ## Build GhidraDosToolbox extension using ghidra/gradlew
+	@if [ -d "$(DOS_TOOLBOX_DIR)" ]; then \
+		echo "GhidraDosToolbox extension already installed at $(DOS_TOOLBOX_DIR), skipping."; \
+	else \
+		echo "Building GhidraDosToolbox extension using ghidra Gradle wrapper..."; \
+		(cd dos-toolbox && JAVA_HOME="$(JAVA21_HOME)" ../ghidra/gradlew -p . -PGHIDRA_INSTALL_DIR=$(INSTALL_DIR) buildExtension); \
+		DOS_ZIP=$$(ls -1 dos-toolbox/dist/*.zip 2>/dev/null | head -n 1); \
+		if [ -z "$$DOS_ZIP" ]; then \
+			echo "ERROR: GhidraDosToolbox zip not found in dos-toolbox/dist/"; \
+			exit 1; \
+		fi; \
+		echo "Installing $$DOS_ZIP into $(INSTALL_DIR)/Ghidra/Extensions/..."; \
+		unzip -q "$$DOS_ZIP" -d $(INSTALL_DIR)/Ghidra/Extensions/; \
+		if [ ! -d "$(DOS_TOOLBOX_DIR)" ]; then \
+			echo "ERROR: Expected $(DOS_TOOLBOX_DIR) after unzip"; \
+			exit 1; \
+		fi; \
+		echo "\033[32mGhidraDosToolbox extension installed successfully.\033[0m"; \
+	fi
+
+install-dos-toolbox: 06-install-dos-toolbox
+```
+
+- [ ] **Step 2: Dry-run test `make -n 06-install-dos-toolbox`**
+
+Run:
+```bash
+make -n 06-install-dos-toolbox
+```
+Expected: PASS with command sequence.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add Makefile
+git commit -m "feat: add 06-install-dos-toolbox target for 16-bit DOS reversing"
+```
+
+---
+
+### Task 8: Python Bridge Virtualenv (`07-venv`)
 
 **Files:**
 - Modify: `Makefile`
@@ -557,13 +625,13 @@ git commit -m "feat: add 05-install-lx-loader target with ghidra wrapper and fal
 - Consumes: `ghidra-mcp/`
 - Produces: `.venv/bin/bridge-mcp-ghidra`
 
-- [ ] **Step 1: Add `06-venv` and `venv` target to `Makefile`**
+- [ ] **Step 1: Add `07-venv` and `venv` target to `Makefile`**
 
 Append to `Makefile`:
 ```makefile
-# ── Stage 6: Python Virtualenv ────────────────────────────────────────────────
+# ── Stage 7: Python Virtualenv ────────────────────────────────────────────────
 
-06-venv: 01-checkout ## Create Python venv and install bridge-mcp-ghidra
+07-venv: 01-checkout ## Create Python venv and install bridge-mcp-ghidra
 	@if [ -d "$(VENV_DIR)" ] && [ -x "$(VENV_DIR)/bin/bridge-mcp-ghidra" ]; then \
 		echo "Virtual environment already configured at $(VENV_DIR), skipping."; \
 	else \
@@ -575,14 +643,14 @@ Append to `Makefile`:
 		echo "\033[32mVirtual environment configured successfully.\033[0m"; \
 	fi
 
-venv: 06-venv
+venv: 07-venv
 ```
 
-- [ ] **Step 2: Test `make 06-venv` (if `ghidra-mcp` is checked out) or dry run**
+- [ ] **Step 2: Test `make 07-venv` or dry run**
 
 Run:
 ```bash
-make -n 06-venv
+make -n 07-venv
 ```
 Expected: PASS.
 
@@ -590,12 +658,12 @@ Expected: PASS.
 
 ```bash
 git add Makefile
-git commit -m "feat: add 06-venv target for bridge-mcp-ghidra installation"
+git commit -m "feat: add 07-venv target for bridge-mcp-ghidra installation"
 ```
 
 ---
 
-### Task 8: opencode MCP Registration (`07-register-mcp`)
+### Task 9: opencode MCP Registration (`08-register-mcp`)
 
 **Files:**
 - Modify: `Makefile`
@@ -631,15 +699,15 @@ python3 test_register_script.py && rm test_register_script.py
 ```
 Expected: PASS.
 
-- [ ] **Step 2: Add `07-register-mcp` and `register-mcp` target to `Makefile`**
+- [ ] **Step 2: Add `08-register-mcp` and `register-mcp` target to `Makefile`**
 
 Append to `Makefile`:
 ```makefile
-# ── Stage 7: opencode MCP Registration ────────────────────────────────────────
+# ── Stage 8: opencode MCP Registration ────────────────────────────────────────
 
 OPENCODE_CONFIG = $(HOME)/.config/opencode/opencode.json
 
-07-register-mcp: 06-venv ## Register bridge-mcp-ghidra in ~/.config/opencode/opencode.json
+08-register-mcp: 07-venv ## Register bridge-mcp-ghidra in ~/.config/opencode/opencode.json
 	@echo "Registering bridge-mcp-ghidra with opencode..."
 	@mkdir -p $(HOME)/.config/opencode
 	@python3 -c '\
@@ -663,14 +731,14 @@ os.replace(cfg_path + ".tmp", cfg_path); \
 print("Registered ghidra MCP server in " + cfg_path)'
 	@echo "\033[32mMCP registration complete.\033[0m"
 
-register-mcp: 07-register-mcp
+register-mcp: 08-register-mcp
 ```
 
-- [ ] **Step 3: Dry-run test `make -n 07-register-mcp`**
+- [ ] **Step 3: Dry-run test `make -n 08-register-mcp`**
 
 Run:
 ```bash
-make -n 07-register-mcp
+make -n 08-register-mcp
 ```
 Expected: PASS.
 
@@ -678,12 +746,12 @@ Expected: PASS.
 
 ```bash
 git add Makefile
-git commit -m "feat: add 07-register-mcp target with atomic config update"
+git commit -m "feat: add 08-register-mcp target with atomic config update"
 ```
 
 ---
 
-### Task 9: Pipeline Aggregation, Runtime, Verification & Cleanup (`install`, `run`, `run-bridge`, `verify`, `clean`, `distclean`)
+### Task 10: Pipeline Aggregation, Runtime, Verification & Cleanup (`install`, `run`, `run-bridge`, `verify`, `clean`, `distclean`)
 
 **Files:**
 - Modify: `Makefile`
@@ -698,7 +766,7 @@ Append to `Makefile`:
 ```makefile
 # ── Pipeline & Runtime ────────────────────────────────────────────────────────
 
-install: 00-env 01-checkout 02-build-ghidra 03-install-ghidra 04-install-mcp 05-install-lx-loader 06-venv 07-register-mcp ## Run entire build and installation pipeline
+install: 00-env 01-checkout 02-build-ghidra 03-install-ghidra 04-install-mcp 05-install-lx-loader 06-install-dos-toolbox 07-venv 08-register-mcp ## Run entire build and installation pipeline
 	@echo "\n\033[01;32m==============================================\033[00m"
 	@echo "\033[01;32m Ghidra Bundle installation completed!       \033[00m"
 	@echo "\033[01;32m Run 'make run' to launch Ghidra.            \033[00m"
@@ -741,11 +809,12 @@ clean: ## Remove build outputs (dist/, .venv/, repo target/dist artifacts)
 	@if [ -d "ghidra" ]; then (cd ghidra && rm -rf build); fi
 	@if [ -d "ghidra-mcp" ]; then (cd ghidra-mcp && rm -rf target build); fi
 	@if [ -d "lx-loader" ]; then (cd lx-loader && rm -rf dist build .gradle); fi
+	@if [ -d "dos-toolbox" ]; then (cd dos-toolbox && rm -rf dist build .gradle); fi
 	@echo "\033[32mClean complete.\033[0m"
 
 distclean: clean ## Remove build outputs and cloned checkouts
 	@echo "Removing cloned checkouts..."
-	@rm -rf ghidra ghidra-mcp lx-loader
+	@rm -rf ghidra ghidra-mcp lx-loader dos-toolbox
 	@echo "\033[32mDistclean complete.\033[0m"
 ```
 
@@ -763,8 +832,9 @@ Expected: Nicely formatted table containing targets:
 - `03-install-ghidra`
 - `04-install-mcp`
 - `05-install-lx-loader`
-- `06-venv`
-- `07-register-mcp`
+- `06-install-dos-toolbox`
+- `07-venv`
+- `08-register-mcp`
 - `install`
 - `run`
 - `run-bridge`
@@ -784,5 +854,5 @@ Expected: PASS.
 
 ```bash
 git add Makefile
-git commit -m "feat: add pipeline aggregation, run, verify, and clean targets"
+git commit -m "feat: add pipeline aggregation with dos-toolbox, run, verify, and clean targets"
 ```
