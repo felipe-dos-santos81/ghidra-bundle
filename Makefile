@@ -5,6 +5,7 @@
 #   07-venv → 08-register-mcp
 
 .NOTPARALLEL:
+.DEFAULT_GOAL := help
 
 SHELL := /bin/bash
 

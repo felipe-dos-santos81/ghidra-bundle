@@ -40,7 +40,7 @@ make env
 ### 1. Clone the Repository
 
 ```bash
-git clone --recurse-submodules https://github.com/username/ghidra-bundle.git
+git clone --recurse-submodules https://github.com/felipe-dos-santos81/ghidra-bundle.git
 cd ghidra-bundle
 ```
 

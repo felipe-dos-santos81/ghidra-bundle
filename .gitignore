@@ -2,6 +2,17 @@
 dist/
 .venv/
 
-# Temporary test files
+# Operating System files
+.DS_Store
+Thumbs.db
+
+# Editor & IDE configurations
+.idea/
+.vscode/
+*.swp
+*~
+
+# Temporary test & scratch files
 test_*.sh
 *.tmp
+scratch/
