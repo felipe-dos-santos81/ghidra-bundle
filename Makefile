@@ -263,3 +263,33 @@ install-dos-toolbox: 06-install-dos-toolbox
 	fi
 
 venv: 07-venv
+
+# ── Stage 8: opencode MCP Registration ────────────────────────────────────────
+
+OPENCODE_CONFIG = $(HOME)/.config/opencode/opencode.json
+
+08-register-mcp: 07-venv ## Register bridge-mcp-ghidra in ~/.config/opencode/opencode.json
+	@echo "Registering bridge-mcp-ghidra with opencode..."
+	@mkdir -p $(HOME)/.config/opencode
+	@python3 -c '\
+import json, os, sys; \
+cfg_path = os.path.expanduser("~/.config/opencode/opencode.json"); \
+bridge_bin = os.path.abspath("$(VENV_DIR)/bin/bridge-mcp-ghidra"); \
+if os.path.exists(cfg_path): \
+    with open(cfg_path, "r", encoding="utf-8") as f: \
+        try: data = json.load(f) \
+        except Exception: data = {} \
+else: \
+    data = {"$$schema": "https://opencode.ai/config.json"}; \
+data.setdefault("mcp", {})["ghidra"] = { \
+    "type": "local", \
+    "command": [bridge_bin], \
+    "enabled": True \
+}; \
+with open(cfg_path + ".tmp", "w", encoding="utf-8") as f: \
+    json.dump(data, f, indent=2); \
+os.replace(cfg_path + ".tmp", cfg_path); \
+print("Registered ghidra MCP server in " + cfg_path)'
+	@echo "\033[32mMCP registration complete.\033[0m"
+
+register-mcp: 08-register-mcp
