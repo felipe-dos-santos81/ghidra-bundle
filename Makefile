@@ -106,3 +106,15 @@ DOS_TOOLBOX_BRANCH = wip-ghidra-12
 
 checkout: 01-checkout
 
+# ── Stage 2: Build Ghidra ─────────────────────────────────────────────────────
+
+02-build-ghidra: 01-checkout ## Build Ghidra 12.1.2 from source via build-ghidra.sh
+	@if compgen -G "ghidra/build/dist/ghidra_12.1.2_*.zip" > /dev/null; then \
+		echo "Ghidra distribution zip already exists in ghidra/build/dist/, skipping."; \
+	else \
+		JAVA_HOME="$(JAVA21_HOME)" ./build-ghidra.sh; \
+	fi
+
+build-ghidra: 02-build-ghidra
+
+
