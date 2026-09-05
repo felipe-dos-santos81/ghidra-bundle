@@ -66,3 +66,43 @@ help: ## Print this help message
 	@echo "\033[32mEnvironment check passed.\033[0m"
 
 env: 00-env
+
+# ── Stage 1: Checkout ─────────────────────────────────────────────────────────
+
+GHIDRA_TAG = Ghidra_12.1.2_build
+GHIDRA_REPO = https://github.com/NationalSecurityAgency/ghidra.git
+GHIDRA_MCP_REPO = https://github.com/bethington/ghidra-mcp.git
+LX_LOADER_REPO = https://github.com/yetmorecode/ghidra-lx-loader.git
+DOS_TOOLBOX_REPO = https://github.com/plaes/GhidraDosToolbox.git
+DOS_TOOLBOX_BRANCH = wip-ghidra-12
+
+01-checkout: ## Shallow clone the four upstream repositories
+	@echo "Checking out upstream repositories..."
+	@if [ ! -d "ghidra" ]; then \
+		echo "Cloning Ghidra (tag $(GHIDRA_TAG))..."; \
+		git clone --depth 1 --branch $(GHIDRA_TAG) $(GHIDRA_REPO) ghidra; \
+	else \
+		echo "ghidra/ already exists, skipping."; \
+	fi
+	@if [ ! -d "ghidra-mcp" ]; then \
+		echo "Cloning ghidra-mcp..."; \
+		git clone --depth 1 $(GHIDRA_MCP_REPO) ghidra-mcp; \
+	else \
+		echo "ghidra-mcp/ already exists, skipping."; \
+	fi
+	@if [ ! -d "lx-loader" ]; then \
+		echo "Cloning ghidra-lx-loader..."; \
+		git clone --depth 1 $(LX_LOADER_REPO) lx-loader; \
+	else \
+		echo "lx-loader/ already exists, skipping."; \
+	fi
+	@if [ ! -d "dos-toolbox" ]; then \
+		echo "Cloning GhidraDosToolbox (branch $(DOS_TOOLBOX_BRANCH))..."; \
+		git clone --depth 1 --branch $(DOS_TOOLBOX_BRANCH) $(DOS_TOOLBOX_REPO) dos-toolbox; \
+	else \
+		echo "dos-toolbox/ already exists, skipping."; \
+	fi
+	@echo "\033[32mCheckout complete.\033[0m"
+
+checkout: 01-checkout
+

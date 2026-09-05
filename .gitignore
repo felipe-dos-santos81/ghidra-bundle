@@ -1,0 +1,13 @@
+# Checkouts
+ghidra/
+ghidra-mcp/
+lx-loader/
+dos-toolbox/
+
+# Bundle build and runtime artifacts
+dist/
+.venv/
+
+# Temporary test files
+test_*.sh
+*.tmp
