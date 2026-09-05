@@ -117,4 +117,43 @@ checkout: 01-checkout
 
 build-ghidra: 02-build-ghidra
 
+# ── Stage 3: Install Ghidra ───────────────────────────────────────────────────
+
+03-install-ghidra: 02-build-ghidra ## Extract Ghidra into dist/ and configure portable mode
+	@if [ -d "$(INSTALL_DIR)" ] && [ -f "$(INSTALL_DIR)/support/launch.properties" ]; then \
+		echo "Ghidra install directory $(INSTALL_DIR) already exists, skipping extraction."; \
+	else \
+		ZIP_FILE=$$(ls -1 ghidra/build/dist/ghidra_12.1.2_*.zip 2>/dev/null | head -n 1); \
+		if [ -z "$$ZIP_FILE" ]; then \
+			echo "ERROR: No Ghidra zip found in ghidra/build/dist/"; \
+			exit 1; \
+		fi; \
+		echo "Extracting $$ZIP_FILE to $(DIST_DIR)..."; \
+		mkdir -p $(DIST_DIR); \
+		unzip -q "$$ZIP_FILE" -d $(DIST_DIR); \
+		EXTRACTED_DIR=$$(ls -d $(DIST_DIR)/ghidra_12.1.2_* | head -n 1); \
+		if [ "$$EXTRACTED_DIR" != "$(INSTALL_DIR)" ]; then \
+			echo "Normalizing $$EXTRACTED_DIR to $(INSTALL_DIR)..."; \
+			rm -rf $(INSTALL_DIR); \
+			mv "$$EXTRACTED_DIR" $(INSTALL_DIR); \
+		fi; \
+	fi
+	@echo "Creating portable directories and extensions folder..."
+	@mkdir -p $(PORTABLE_DIR)/settings $(PORTABLE_DIR)/cache $(PORTABLE_DIR)/temp
+	@mkdir -p $(INSTALL_DIR)/Ghidra/Extensions
+	@echo "Patching $(INSTALL_DIR)/support/launch.properties for portable mode..."
+	@if ! grep -q "application.settingsdir" $(INSTALL_DIR)/support/launch.properties; then \
+		echo "" >> $(INSTALL_DIR)/support/launch.properties; \
+		echo "# --- Portable Mode Overrides ---" >> $(INSTALL_DIR)/support/launch.properties; \
+		echo "JAVA_HOME_OVERRIDE=$(JAVA21_HOME)" >> $(INSTALL_DIR)/support/launch.properties; \
+		echo "VMARGS=-Dapplication.settingsdir=\$${INSTALL_DIR}/portable/settings" >> $(INSTALL_DIR)/support/launch.properties; \
+		echo "VMARGS=-Dapplication.cachedir=\$${INSTALL_DIR}/portable/cache" >> $(INSTALL_DIR)/support/launch.properties; \
+		echo "VMARGS=-Dapplication.tempdir=\$${INSTALL_DIR}/portable/temp" >> $(INSTALL_DIR)/support/launch.properties; \
+		echo "\033[32mSuccessfully patched launch.properties.\033[0m"; \
+	else \
+		echo "launch.properties already patched, skipping."; \
+	fi
+
+install-ghidra: 03-install-ghidra
+
 
