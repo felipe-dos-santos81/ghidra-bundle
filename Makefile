@@ -293,3 +293,57 @@ print("Registered ghidra MCP server in " + cfg_path)'
 	@echo "\033[32mMCP registration complete.\033[0m"
 
 register-mcp: 08-register-mcp
+
+# ── Pipeline & Runtime ────────────────────────────────────────────────────────
+
+install: 00-env 01-checkout 02-build-ghidra 03-install-ghidra 04-install-mcp 05-install-lx-loader 06-install-dos-toolbox 07-venv 08-register-mcp ## Run entire build and installation pipeline
+	@echo "\n\033[01;32m==============================================\033[00m"
+	@echo "\033[01;32m Ghidra Bundle installation completed!       \033[00m"
+	@echo "\033[01;32m Run 'make run' to launch Ghidra.            \033[00m"
+	@echo "\033[01;32m==============================================\033[00m\n"
+
+run: ## Launch isolated Ghidra instance (checks port 8089 collision)
+	@if lsof -i :8089 >/dev/null 2>&1; then \
+		echo "\033[31mERROR: Port 8089 is already bound by another process:\033[0m"; \
+		lsof -i :8089; \
+		exit 1; \
+	fi
+	@if [ ! -x "$(INSTALL_DIR)/ghidraRun" ]; then \
+		echo "ERROR: $(INSTALL_DIR)/ghidraRun not found. Run 'make install' first."; \
+		exit 1; \
+	fi
+	@echo "Launching isolated Ghidra from $(INSTALL_DIR)..."
+	@"$(INSTALL_DIR)/ghidraRun"
+
+run-bridge: ## Start bridge-mcp-ghidra from the virtual environment
+	@if [ ! -x "$(VENV_DIR)/bin/bridge-mcp-ghidra" ]; then \
+		echo "ERROR: $(VENV_DIR)/bin/bridge-mcp-ghidra not found. Run 'make venv' first."; \
+		exit 1; \
+	fi
+	@"$(VENV_DIR)/bin/bridge-mcp-ghidra"
+
+verify: ## Check GhidraMCP plugin connection at http://127.0.0.1:8089
+	@echo "Testing GhidraMCP HTTP endpoint..."
+	@curl -s -f http://127.0.0.1:8089/check_connection || { \
+		echo "\n\033[31mCould not connect to GhidraMCP server on port 8089.\033[0m"; \
+		echo "Ensure Ghidra is running with the GhidraMCP plugin enabled."; \
+		exit 1; \
+	}
+	@echo "\n\033[32mGhidraMCP connection verified.\033[0m"
+
+# ── Cleanup ───────────────────────────────────────────────────────────────────
+
+clean: ## Remove build outputs (dist/, .venv/, repo target/dist artifacts)
+	@echo "Cleaning bundle build artifacts..."
+	@rm -rf $(DIST_DIR) $(VENV_DIR)
+	@rm -f lx-loader/fallback.zip
+	@if [ -d "ghidra" ]; then (cd ghidra && rm -rf build); fi
+	@if [ -d "ghidra-mcp" ]; then (cd ghidra-mcp && rm -rf target build); fi
+	@if [ -d "lx-loader" ]; then (cd lx-loader && rm -rf dist build .gradle fallback.zip); fi
+	@if [ -d "dos-toolbox" ]; then (cd dos-toolbox && rm -rf dist build .gradle); fi
+	@echo "\033[32mClean complete.\033[0m"
+
+distclean: clean ## Remove build outputs and cloned checkouts
+	@echo "Removing cloned checkouts..."
+	@rm -rf ghidra ghidra-mcp lx-loader dos-toolbox
+	@echo "\033[32mDistclean complete.\033[0m"
