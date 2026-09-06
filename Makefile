@@ -223,29 +223,35 @@ venv: 07-venv
 
 OPENCODE_CONFIG = $(HOME)/.config/opencode/opencode.json
 
+define REGISTER_SCRIPT
+import json, os
+cfg_path = os.path.expanduser("$(OPENCODE_CONFIG)")
+bridge_bin = os.path.abspath("$(BRIDGE_BIN)")
+data = None
+if os.path.exists(cfg_path):
+    try:
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        pass
+if data is None:
+    data = {"$$schema": "https://opencode.ai/config.json"}
+entry = {"type": "local", "command": [bridge_bin], "enabled": True}
+if data.get("mcp", {}).get("ghidra") == entry:
+    print("Ghidra MCP server already registered in " + cfg_path)
+else:
+    data.setdefault("mcp", {})["ghidra"] = entry
+    with open(cfg_path + ".tmp", "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    os.replace(cfg_path + ".tmp", cfg_path)
+    print("Registered ghidra MCP server in " + cfg_path)
+endef
+export REGISTER_SCRIPT
+
 08-register-mcp: 07-venv ## Register bridge-mcp-ghidra in ~/.config/opencode/opencode.json
 	@echo "Registering bridge-mcp-ghidra with opencode..."
 	@mkdir -p "$$(dirname "$(OPENCODE_CONFIG)")"
-	@python3 -c '\
-import json, os; \
-cfg_path = os.path.expanduser("$(OPENCODE_CONFIG)"); \
-bridge_bin = os.path.abspath("$(BRIDGE_BIN)"); \
-data = None; \
-if os.path.exists(cfg_path): \
-    with open(cfg_path, "r", encoding="utf-8") as f: \
-        try: data = json.load(f) \
-        except Exception: pass; \
-if data is None: \
-    data = {"$$schema": "https://opencode.ai/config.json"}; \
-entry = {"type": "local", "command": [bridge_bin], "enabled": True}; \
-if data.get("mcp", {}).get("ghidra") == entry: \
-    print("Ghidra MCP server already registered in " + cfg_path); \
-else: \
-    data.setdefault("mcp", {})["ghidra"] = entry; \
-    with open(cfg_path + ".tmp", "w", encoding="utf-8") as f: \
-        json.dump(data, f, indent=2); \
-    os.replace(cfg_path + ".tmp", cfg_path); \
-    print("Registered ghidra MCP server in " + cfg_path)'
+	@python3 -c "$$REGISTER_SCRIPT"
 	@printf '\033[32mMCP registration complete.\033[0m\n'
 
 register-mcp: 08-register-mcp
