@@ -1,6 +1,6 @@
 # Makefile for Ghidra Bundle
 # Targets are numbered by pipeline stage:
-#   00-env → 01-checkout → 02-build-ghidra → 03-install-ghidra →
+#   00-deps → 00-env → 01-checkout → 02-build-ghidra → 03-install-ghidra →
 #   04-install-mcp → 05-install-lx-loader → 06-install-dos-toolbox →
 #   07-venv → 08-register-mcp
 
@@ -29,11 +29,11 @@ UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
 JAVA21_HOME ?= $(shell /usr/libexec/java_home -F -v 21 2>/dev/null)
 else
-# Linux: prefer $JAVA_HOME if JDK 21, else scan /usr/lib/jvm/*21*, else derive from javac
-JAVA21_HOME ?= $(shell if [ -n "$$JAVA_HOME" ] && [ -x "$$JAVA_HOME/bin/java" ] && "$$JAVA_HOME/bin/java" -version 2>&1 | grep -q 'version "21'; then echo "$$JAVA_HOME"; elif ls -d /usr/lib/jvm/*21* 2>/dev/null | head -n 1 | grep -q .; then ls -d /usr/lib/jvm/*21* 2>/dev/null | head -n 1; elif command -v javac >/dev/null 2>&1; then _JAVAC=$$(readlink -f $$(command -v javac)); _CAND=$$(dirname $$(dirname "$$_JAVAC")); if [ -x "$$_CAND/bin/java" ] && "$$_CAND/bin/java" -version 2>&1 | grep -q 'version "21'; then echo "$$_CAND"; fi; fi)
+# Linux: prefer $JAVA_HOME if JDK 21, else scan /usr/lib/jvm, else derive from javac (canonicalized)
+JAVA21_HOME ?= $(shell if [ -n "$$JAVA_HOME" ] && [ -x "$$JAVA_HOME/bin/java" ] && "$$JAVA_HOME/bin/java" -version 2>&1 | grep -q 'version "21'; then readlink -f "$$JAVA_HOME"; else _FOUND=""; for p in /usr/lib/jvm/java-21* /usr/lib/jvm/openjdk-21* /usr/lib/jvm/*21*; do if [ -d "$$p" ] && [ -x "$$p/bin/java" ] && "$$p/bin/java" -version 2>&1 | grep -q 'version "21'; then _FOUND="$$(readlink -f "$$p")"; break; fi; done; if [ -n "$$_FOUND" ]; then echo "$$_FOUND"; elif command -v javac >/dev/null 2>&1; then _JAVAC=$$(readlink -f $$(command -v javac)); _CAND=$$(dirname $$(dirname "$$_JAVAC")); if [ -x "$$_CAND/bin/java" ] && "$$_CAND/bin/java" -version 2>&1 | grep -q 'version "21'; then echo "$$_CAND"; fi; fi; fi)
 endif
 export JAVA_HOME := $(JAVA21_HOME)
-export PATH := $(JAVA21_HOME)/bin:$(PATH)
+export PATH := $(JAVA21_HOME)/bin:$(HOME)/.local/bin:$(HOME)/.cargo/bin:$(PATH)
 
 # Reusable Macros
 
@@ -54,7 +54,7 @@ define install_extension_zip
 	fi
 endef
 
-.PHONY: help 00-env env \
+.PHONY: help 00-deps deps 00-env env \
         01-checkout checkout \
         02-build-ghidra build-ghidra \
         03-install-ghidra install-ghidra \
@@ -73,6 +73,43 @@ help: ## Print this help message
 	@grep -E '^[-a-zA-Z0-9_\.\/]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; \
 		{printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}'
+
+# ── Stage 0: System dependencies ──────────────────────────────────────────────
+
+00-deps: ## Install missing OS packages (sudo apt on Linux, brew on macOS) + uv
+	@if [ "$(UNAME_S)" = "Darwin" ]; then \
+		echo "Installing missing prerequisites via Homebrew..."; \
+		{ [ -n "$(JAVA21_HOME)" ] && [ -d "$(JAVA21_HOME)" ]; } || brew install --cask temurin@21; \
+		command -v mvn >/dev/null 2>&1 || brew install maven; \
+		command -v clang >/dev/null 2>&1 || xcode-select --install; \
+		command -v python3 >/dev/null 2>&1 || brew install python@3.12; \
+		command -v uv >/dev/null 2>&1 || brew install uv; \
+		command -v git >/dev/null 2>&1 || brew install git; \
+	else \
+		echo "Installing missing prerequisites via apt..."; \
+		_PKGS=""; \
+		{ [ -n "$(JAVA21_HOME)" ] && [ -d "$(JAVA21_HOME)" ]; } || _PKGS="$$_PKGS openjdk-21-jdk"; \
+		command -v mvn >/dev/null 2>&1 || _PKGS="$$_PKGS maven"; \
+		command -v clang >/dev/null 2>&1 || _PKGS="$$_PKGS clang"; \
+		command -v python3 >/dev/null 2>&1 || _PKGS="$$_PKGS python3 python3-venv"; \
+		python3 -c "import venv" >/dev/null 2>&1 || _PKGS="$$_PKGS python3-venv"; \
+		command -v git >/dev/null 2>&1 || _PKGS="$$_PKGS git"; \
+		command -v curl >/dev/null 2>&1 || _PKGS="$$_PKGS curl"; \
+		if [ -n "$$_PKGS" ]; then \
+			sudo apt update && sudo apt install -y $$_PKGS || exit 1; \
+		else \
+			echo "All OS packages already present, skipping apt."; \
+		fi; \
+		if ! command -v uv >/dev/null 2>&1 && [ ! -x "$(HOME)/.local/bin/uv" ] && [ ! -x "$(HOME)/.cargo/bin/uv" ]; then \
+			echo "Installing uv..."; \
+			curl -LsSf https://astral.sh/uv/install.sh | sh || exit 1; \
+		else \
+			echo "uv already present, skipping installer."; \
+		fi; \
+	fi
+	@printf '\033[32mSystem dependencies ready.\033[0m\n'
+
+deps: 00-deps
 
 # ── Stage 0: Environment ──────────────────────────────────────────────────────
 
@@ -270,7 +307,7 @@ register-mcp: 08-register-mcp
 
 # ── Pipeline & Runtime ────────────────────────────────────────────────────────
 
-install: 00-env 01-checkout 02-build-ghidra 03-install-ghidra 04-install-mcp 05-install-lx-loader 06-install-dos-toolbox 07-venv 08-register-mcp ## Run entire build and installation pipeline
+install: 00-deps 00-env 01-checkout 02-build-ghidra 03-install-ghidra 04-install-mcp 05-install-lx-loader 06-install-dos-toolbox 07-venv 08-register-mcp ## Run entire build and installation pipeline
 	@printf '\n\033[01;32m==============================================\033[00m\n'
 	@printf '\033[01;32m Ghidra Bundle installation completed!       \033[00m\n'
 	@printf '\033[01;32m Run '\''make run'\'' to launch Ghidra.            \033[00m\n'

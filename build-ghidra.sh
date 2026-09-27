@@ -13,17 +13,22 @@ cd "$GHIDRA_SRC_DIR"
 
 resolve_java_home_linux() {
   if [[ -n "${JAVA_HOME:-}" && -x "$JAVA_HOME/bin/java" ]] && "$JAVA_HOME/bin/java" -version 2>&1 | grep -q 'version "21'; then
-    echo "$JAVA_HOME"
+    readlink -f "$JAVA_HOME"
     return 0
   fi
-  local candidate
-  candidate="$(ls -d /usr/lib/jvm/*21* 2>/dev/null | head -n 1 || true)"
-  if [[ -n "$candidate" && -d "$candidate" ]]; then
-    echo "$candidate"
+  local p found=""
+  for p in /usr/lib/jvm/java-21* /usr/lib/jvm/openjdk-21* /usr/lib/jvm/*21*; do
+    if [[ -d "$p" && -x "$p/bin/java" ]] && "$p/bin/java" -version 2>&1 | grep -q 'version "21'; then
+      found="$(readlink -f "$p")"
+      break
+    fi
+  done
+  if [[ -n "$found" ]]; then
+    echo "$found"
     return 0
   fi
   if command -v javac >/dev/null 2>&1; then
-    local javac_path resolved
+    local javac_path resolved candidate
     javac_path="$(command -v javac)"
     resolved="$(readlink -f "$javac_path")"
     candidate="$(dirname "$(dirname "$resolved")")"

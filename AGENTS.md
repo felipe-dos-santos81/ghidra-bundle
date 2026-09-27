@@ -69,6 +69,7 @@ The build pipeline is sequenced using numbered targets:
 
 | Stage | Target | Description |
 | :--- | :--- | :--- |
+| `00` | `00-deps` (`deps`) | Installs missing OS packages (`sudo apt` on Linux, `brew` on macOS) + `uv`; skips when all present |
 | `00` | `00-env` (`env`) | Validates JDK 21, Maven, Clang, Python 3, uv, Git |
 | `01` | `01-checkout` (`checkout`) | Fetches submodules (`--depth 1`) |
 | `02` | `02-build-ghidra` (`build-ghidra`) | Runs headless build script `build-ghidra.sh` |

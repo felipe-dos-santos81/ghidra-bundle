@@ -28,6 +28,10 @@ A fully self-contained, isolated Ghidra 12.1.2 installation bundled with [Ghidra
 | **uv** | Fast Python package manager | `brew install uv` | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
 | **Git** | 2.25+ | `brew install git` | `sudo apt install -y git` |
 
+> **Note:** You don't need to install these by hand. `make install` runs
+> `make deps` first, which auto-installs only the missing packages
+> (`sudo apt` on Linux, `brew` on macOS) plus `uv` via the official installer.
+
 Verify all host prerequisites at any time:
 ```bash
 make env
@@ -53,15 +57,16 @@ make install
 ```
 
 This single command executes the complete pipeline:
-1. Validates host dependencies (`00-env`)
-2. Synchronizes submodules (`01-checkout`)
-3. Builds Ghidra 12.1.2 from source (`02-build-ghidra`)
-4. Extracts to `dist/` and configures portable mode (`03-install-ghidra`)
-5. Builds and installs GhidraMCP (`04-install-mcp`)
-6. Builds and installs lx-loader (`05-install-lx-loader`)
-7. Builds and installs GhidraDosToolbox (`06-install-dos-toolbox`)
-8. Creates Python `.venv` and installs `bridge-mcp-ghidra` (`07-venv`)
-9. Registers the MCP bridge in `~/.config/opencode/opencode.json` (`08-register-mcp`)
+1. Installs missing OS packages and `uv` (`00-deps`, uses `sudo apt` on Linux / `brew` on macOS)
+2. Validates host dependencies (`00-env`)
+3. Synchronizes submodules (`01-checkout`)
+4. Builds Ghidra 12.1.2 from source (`02-build-ghidra`)
+5. Extracts to `dist/` and configures portable mode (`03-install-ghidra`)
+6. Builds and installs GhidraMCP (`04-install-mcp`)
+7. Builds and installs lx-loader (`05-install-lx-loader`)
+8. Builds and installs GhidraDosToolbox (`06-install-dos-toolbox`)
+9. Creates Python `.venv` and installs `bridge-mcp-ghidra` (`07-venv`)
+10. Registers the MCP bridge in `~/.config/opencode/opencode.json` (`08-register-mcp`)
 
 ---
 
@@ -114,6 +119,7 @@ ghidra-bundle/
 | Target | Description |
 | :--- | :--- |
 | `make help` | Displays available targets with descriptions |
+| `make deps` | Installs missing OS packages (`sudo apt` on Linux, `brew` on macOS) and `uv` |
 | `make env` | Validates host prerequisites (JDK 21, Maven, Clang, Python, uv, Git) |
 | `make checkout` | Initializes and updates Git submodules with `--depth 1` |
 | `make build-ghidra` | Compiles Ghidra 12.1.2 distribution zip |
@@ -123,7 +129,7 @@ ghidra-bundle/
 | `make install-dos-toolbox`| Builds and installs GhidraDosToolbox extension |
 | `make venv` | Configures Python virtualenv and installs `bridge-mcp-ghidra` |
 | `make register-mcp` | Atomically registers MCP bridge in `~/.config/opencode/opencode.json` |
-| `make install` | Runs the full pipeline end-to-end |
+| `make install` | Installs OS deps, then runs the full pipeline end-to-end |
 | `make run` | Starts the isolated Ghidra instance |
 | `make run-bridge` | Runs the MCP bridge server |
 | `make verify` | Tests HTTP connection to running GhidraMCP plugin |
