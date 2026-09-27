@@ -22,8 +22,16 @@ VENV_DIR = $(BUNDLE_DIR)/.venv
 PIP = $(VENV_DIR)/bin/pip
 BRIDGE_BIN = $(VENV_DIR)/bin/bridge-mcp-ghidra
 
+# OS detection (Darwin = macOS, Linux = Linux)
+UNAME_S := $(shell uname -s)
+
 # Java 21 resolution and environment propagation
+ifeq ($(UNAME_S),Darwin)
 JAVA21_HOME ?= $(shell /usr/libexec/java_home -F -v 21 2>/dev/null)
+else
+# Linux: prefer $JAVA_HOME if JDK 21, else scan /usr/lib/jvm/*21*, else derive from javac
+JAVA21_HOME ?= $(shell if [ -n "$$JAVA_HOME" ] && [ -x "$$JAVA_HOME/bin/java" ] && "$$JAVA_HOME/bin/java" -version 2>&1 | grep -q 'version "21'; then echo "$$JAVA_HOME"; elif ls -d /usr/lib/jvm/*21* 2>/dev/null | head -n 1 | grep -q .; then ls -d /usr/lib/jvm/*21* 2>/dev/null | head -n 1; elif command -v javac >/dev/null 2>&1; then _JAVAC=$$(readlink -f $$(command -v javac)); _CAND=$$(dirname $$(dirname "$$_JAVAC")); if [ -x "$$_CAND/bin/java" ] && "$$_CAND/bin/java" -version 2>&1 | grep -q 'version "21'; then echo "$$_CAND"; fi; fi)
+endif
 export JAVA_HOME := $(JAVA21_HOME)
 export PATH := $(JAVA21_HOME)/bin:$(PATH)
 
@@ -69,23 +77,27 @@ help: ## Print this help message
 # ── Stage 0: Environment ──────────────────────────────────────────────────────
 
 00-env: ## Validate host prerequisites (JDK 21, Maven, Clang, Python 3, uv, git)
-	@echo "Checking host prerequisites..."
+	@echo "Checking host prerequisites on $(UNAME_S)..."
 	@if [ -z "$(JAVA21_HOME)" ] || [ ! -d "$(JAVA21_HOME)" ]; then \
-		printf '\033[31mERROR: JDK 21 not found via /usr/libexec/java_home -F -v 21\033[0m\n'; \
-		echo "Install JDK 21 using: brew install --cask temurin@21"; \
+		printf '\033[31mERROR: JDK 21 not found.\033[0m\n'; \
+		if [ "$(UNAME_S)" = "Darwin" ]; then \
+			echo "Install JDK 21 using: brew install --cask temurin@21"; \
+		else \
+			echo "Install JDK 21 using: sudo apt install -y openjdk-21-jdk"; \
+		fi; \
 		exit 1; \
 	else \
 		printf '\033[32m✔ JDK 21:\033[0m %s\n' "$(JAVA21_HOME)"; \
 	fi
-	@command -v mvn >/dev/null 2>&1 || { printf '\033[31mERROR: Maven (mvn) not found on PATH\033[0m\n'; exit 1; }
+	@command -v mvn >/dev/null 2>&1 || { printf '\033[31mERROR: Maven (mvn) not found on PATH\033[0m\n'; if [ "$(UNAME_S)" = "Darwin" ]; then echo "Install using: brew install maven"; else echo "Install using: sudo apt install -y maven"; fi; exit 1; }
 	@printf '\033[32m✔ Maven:\033[0m %s\n' "$$(mvn -version | head -n 1)"
-	@command -v clang >/dev/null 2>&1 || { printf '\033[31mERROR: Clang not found (needed for Ghidra decompiler build)\033[0m\n'; exit 1; }
+	@command -v clang >/dev/null 2>&1 || { printf '\033[31mERROR: Clang not found (needed for Ghidra decompiler build)\033[0m\n'; if [ "$(UNAME_S)" = "Darwin" ]; then echo "Install using: xcode-select --install"; else echo "Install using: sudo apt install -y clang"; fi; exit 1; }
 	@printf '\033[32m✔ Clang:\033[0m %s\n' "$$(clang --version | head -n 1)"
-	@command -v python3 >/dev/null 2>&1 || { printf '\033[31mERROR: Python 3 not found on PATH\033[0m\n'; exit 1; }
+	@command -v python3 >/dev/null 2>&1 || { printf '\033[31mERROR: Python 3 not found on PATH\033[0m\n'; if [ "$(UNAME_S)" = "Darwin" ]; then echo "Install using: brew install python@3.12"; else echo "Install using: sudo apt install -y python3 python3-venv"; fi; exit 1; }
 	@printf '\033[32m✔ Python:\033[0m %s\n' "$$(python3 --version)"
-	@command -v uv >/dev/null 2>&1 || { printf '\033[31mERROR: uv not found on PATH\033[0m\n'; exit 1; }
+	@command -v uv >/dev/null 2>&1 || { printf '\033[31mERROR: uv not found on PATH\033[0m\n'; if [ "$(UNAME_S)" = "Darwin" ]; then echo "Install using: brew install uv"; else echo "Install using: curl -LsSf https://astral.sh/uv/install.sh | sh"; fi; exit 1; }
 	@printf '\033[32m✔ uv:\033[0m %s\n' "$$(uv --version)"
-	@command -v git >/dev/null 2>&1 || { printf '\033[31mERROR: Git not found on PATH\033[0m\n'; exit 1; }
+	@command -v git >/dev/null 2>&1 || { printf '\033[31mERROR: Git not found on PATH\033[0m\n'; if [ "$(UNAME_S)" = "Darwin" ]; then echo "Install using: brew install git"; else echo "Install using: sudo apt install -y git"; fi; exit 1; }
 	@printf '\033[32m✔ Git:\033[0m %s\n' "$$(git --version)"
 	@printf '\033[32mEnvironment check passed.\033[0m\n'
 
@@ -265,10 +277,20 @@ install: 00-env 01-checkout 02-build-ghidra 03-install-ghidra 04-install-mcp 05-
 	@printf '\033[01;32m==============================================\033[00m\n\n'
 
 run: ## Launch isolated Ghidra instance (checks port 8089 collision)
-	@if lsof -i :8089 >/dev/null 2>&1; then \
-		printf '\033[31mERROR: Port 8089 is already bound by another process:\033[0m\n'; \
-		lsof -i :8089; \
-		exit 1; \
+	@if command -v lsof >/dev/null 2>&1; then \
+		if lsof -i :8089 >/dev/null 2>&1; then \
+			printf '\033[31mERROR: Port 8089 is already bound by another process:\033[0m\n'; \
+			lsof -i :8089; \
+			exit 1; \
+		fi; \
+	elif command -v ss >/dev/null 2>&1; then \
+		if ss -ltn 2>/dev/null | grep -q ':8089 '; then \
+			printf '\033[31mERROR: Port 8089 is already bound by another process:\033[0m\n'; \
+			ss -ltnp 2>/dev/null | grep ':8089 ' || true; \
+			exit 1; \
+		fi; \
+	else \
+		printf '\033[33mWARNING: neither lsof nor ss found, skipping port 8089 check.\033[0m\n'; \
 	fi
 	@if [ ! -x "$(INSTALL_DIR)/ghidraRun" ]; then \
 		echo "ERROR: $(INSTALL_DIR)/ghidraRun not found. Run 'make install' first."; \

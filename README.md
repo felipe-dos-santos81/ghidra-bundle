@@ -19,14 +19,14 @@ A fully self-contained, isolated Ghidra 12.1.2 installation bundled with [Ghidra
 
 ## Prerequisites
 
-| Tool | Version / Note | Recommended Install (macOS) |
-| :--- | :--- | :--- |
-| **JDK 21** | Required by Ghidra 12+ | `brew install --cask temurin@21` |
-| **Maven** | Required to stage Ghidra JAR dependencies for MCP | `brew install maven` |
-| **Clang** | Required to compile Ghidra native decompiler | `xcode-select --install` |
-| **Python** | 3.10 or newer | `brew install python@3.12` |
-| **uv** | Fast Python package manager | `brew install uv` |
-| **Git** | 2.25+ | `brew install git` |
+| Tool | Version / Note | macOS | Linux (Debian/Ubuntu) |
+| :--- | :--- | :--- | :--- |
+| **JDK 21** | Required by Ghidra 12+ | `brew install --cask temurin@21` | `sudo apt install -y openjdk-21-jdk` |
+| **Maven** | Required to stage Ghidra JAR dependencies for MCP | `brew install maven` | `sudo apt install -y maven` |
+| **Clang** | Required to compile Ghidra native decompiler | `xcode-select --install` | `sudo apt install -y clang` |
+| **Python** | 3.10 or newer | `brew install python@3.12` | `sudo apt install -y python3 python3-venv` |
+| **uv** | Fast Python package manager | `brew install uv` | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
+| **Git** | 2.25+ | `brew install git` | `sudo apt install -y git` |
 
 Verify all host prerequisites at any time:
 ```bash
