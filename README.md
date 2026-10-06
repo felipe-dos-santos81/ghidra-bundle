@@ -42,15 +42,22 @@ Run `make help` for the same list.
 | `04-install-mcp` (`install-mcp`) | Build and install GhidraMCP |
 | `05-install-lx-loader` (`install-lx-loader`) | Build and install lx-loader |
 | `06-install-dos-toolbox` (`install-dos-toolbox`) | Build and install GhidraDosToolbox |
-| `verify-extensions` | Check headlessly that Ghidra loads every extension's classes |
 | `07-venv` (`venv`) | Create `.venv` with `bridge-mcp-ghidra` |
 | `08-register-mcp` (`register-mcp`) | Register the MCP server with opencode and Claude Code |
-| `install` | Run all of the above, in order |
+| `verify-extensions` | Quick headless check that Ghidra loads every extension's classes |
+| `test` | Run the sanity test suite (see Testing) |
+| `install` | Run all of the above, in order (ends with `test`) |
 | `run` | Launch Ghidra (fails if port 8089 is in use) |
 | `run-bridge` | Run the MCP bridge over stdio |
 | `verify` | Check the GhidraMCP plugin answers on port 8089 |
 | `clean` | Remove `dist/`, `.venv/` and build outputs |
 | `distclean` | `clean`, then de-initialize the submodules |
+
+## Testing
+
+`make test` (also the last stage of `make install`) builds three tiny programs and checks that Ghidra handles them: an i386 ELF object (core loader and decompiler), a DOS MZ file (GhidraDosToolbox loader and syscall analyzer) and an LE file (lx-loader, including an applied fixup). It then starts GhidraMCP's headless server on port 18089 (`TEST_MCP_PORT`) and checks it over HTTP. It takes about 1–2 minutes and leaves nothing behind.
+
+Decompiled output is also compared with `tests/snapshots/`; differences are reported but never fail the run. After a deliberate Ghidra or extension upgrade, record the new output with `UPDATE_SNAPSHOTS=1 make test`. Verified on Linux arm64; macOS is untested.
 
 ## Layout
 
@@ -58,7 +65,8 @@ Run `make help` for the same list.
 ghidra-bundle/
 ├── Makefile              # Build and install pipeline
 ├── build-ghidra.sh       # Ghidra source build (called by 02-build-ghidra)
-├── ghidra_scripts/       # VerifyExtensions.java (used by verify-extensions)
+├── ghidra_scripts/       # VerifyExtensions.java, SanityCheck.java (used by make)
+├── tests/                # make test: fixtures, expectations, snapshots, run-sanity.sh
 ├── ghidra/               # Submodule: NSA Ghidra, tag Ghidra_12.1.4_build
 ├── ghidra-mcp/           # Submodule: GhidraMCP
 ├── lx-loader/            # Submodule: ghidra-lx-loader

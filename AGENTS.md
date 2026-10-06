@@ -35,7 +35,7 @@ Operational context, invariants and conventions for AI coding agents working in 
   - `lx-loader/` (`lib/lx-loader.jar`)
   - `dos-toolbox/` (`lib/dos-toolbox.jar`)
 - **Never rename an extension directory.** Outside development mode, Ghidra's `ClassSearcher` only scans `<ext>/lib/<jar>.jar` when the jar name starts with the directory name. A renamed extension still shows its scripts but silently loses its loaders, analyzers and plugins.
-- `make verify-extensions` (run by `make install`) uses `ghidra_scripts/VerifyExtensions.java` to confirm headlessly that each extension's key classes are loaded. Add a check there when adding an extension.
+- `make verify-extensions` (run by `make test`) uses `ghidra_scripts/VerifyExtensions.java` to confirm headlessly that each extension's key classes are loaded. Add a check there when adding an extension.
 
 ### 2.3 Submodules & Versions
 - Upstream repositories are shallow submodules:
@@ -69,11 +69,11 @@ Operational context, invariants and conventions for AI coding agents working in 
 | `04` | `04-install-mcp` (`install-mcp`) | Builds and installs GhidraMCP (`install_extension` macro) |
 | `05` | `05-install-lx-loader` (`install-lx-loader`) | Builds and installs lx-loader (`install_extension` macro) |
 | `06` | `06-install-dos-toolbox` (`install-dos-toolbox`) | Builds and installs GhidraDosToolbox (`install_extension` macro) |
-| — | `verify-extensions` | Headless check that every extension's classes are loaded |
 | `07` | `07-venv` (`venv`) | Creates `.venv` and installs `bridge-mcp-ghidra` |
 | `08` | `08-register-mcp` (`register-mcp`) | Registers `ghidra` with opencode (atomic JSON write) and Claude Code (`claude mcp add --scope user`, skipped if `claude` is absent) |
+| — | `test` | Sanity suite (`tests/run-sanity.sh`): runs `verify-extensions`, imports the ELF/DOS/LE fixtures headlessly and checks them with `SanityCheck.java`, then checks GhidraMCP over HTTP on `TEST_MCP_PORT` (18089) |
 
-Runtime and maintenance: `install` (runs `$(PIPELINE)`, all of the above), `run`, `run-bridge`, `verify` (probes `http://127.0.0.1:8089/check_connection`), `clean`, `distclean`.
+Runtime and maintenance: `install` (runs `$(PIPELINE)`, all of the above, ending with `test`; `verify-extensions` remains a standalone target), `run`, `run-bridge`, `verify` (probes `http://127.0.0.1:8089/check_connection`), `clean`, `distclean`.
 
 ---
 
@@ -91,5 +91,6 @@ Runtime and maintenance: `install` (runs `$(PIPELINE)`, all of the above), `run`
    - `make help` renders cleanly.
    - `make env` passes.
    - `make -n install` expands without errors.
-   - `make verify-extensions` passes (needs an installed Ghidra).
+   - `make test` passes (needs an installed Ghidra).
    - `git status` is clean.
+4. **Adding a test fixture:** build it in `tests/make_fixtures.py` (or add a C file compiled by `tests/run-sanity.sh`), list its facts in `tests/expect/<name>.txt` (grammar in the sanity-test spec, section 5), add a `run_fixture <name> <file> [loader]` line to `tests/run-sanity.sh`, then record snapshots with `UPDATE_SNAPSHOTS=1 make test`. `SanityCheck.java` needs no change.

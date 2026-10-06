@@ -2,7 +2,7 @@
 # and GhidraDosToolbox. `make install` runs the numbered stages in order:
 #   00-deps → 00-env → 01-checkout → 02-build-ghidra → 03-install-ghidra →
 #   04-install-mcp → 05-install-lx-loader → 06-install-dos-toolbox →
-#   verify-extensions → 07-venv → 08-register-mcp
+#   07-venv → 08-register-mcp → test
 # Every stage is idempotent and skips work that is already done.
 
 .NOTPARALLEL:
@@ -48,7 +48,7 @@ ERR = printf '\033[31mERROR: %s\033[0m\n'
 .PHONY: help 00-deps deps 00-env env 01-checkout checkout 02-build-ghidra build-ghidra \
 	03-install-ghidra install-ghidra 04-install-mcp install-mcp \
 	05-install-lx-loader install-lx-loader 06-install-dos-toolbox install-dos-toolbox \
-	verify-extensions 07-venv venv 08-register-mcp register-mcp \
+	verify-extensions test 07-venv venv 08-register-mcp register-mcp \
 	install run run-bridge verify clean distclean
 
 help: ## Show this help
@@ -183,6 +183,9 @@ verify-extensions: ## Check headlessly that Ghidra loads every extension's class
 	fi
 	@$(OK) "All extension classes loaded."
 
+test: ## Run the sanity test suite (fixtures, decompiler, extensions, GhidraMCP)
+	@tests/run-sanity.sh "$(INSTALL_DIR)" "$(JAVA21_HOME)"
+
 install-mcp: 04-install-mcp
 install-lx-loader: 05-install-lx-loader
 install-dos-toolbox: 06-install-dos-toolbox
@@ -236,7 +239,7 @@ register-mcp: 08-register-mcp
 # ── Pipeline & runtime ────────────────────────────────────────────────────────
 
 PIPELINE := 00-deps 00-env 01-checkout 02-build-ghidra 03-install-ghidra 04-install-mcp \
-	05-install-lx-loader 06-install-dos-toolbox verify-extensions 07-venv 08-register-mcp
+	05-install-lx-loader 06-install-dos-toolbox 07-venv 08-register-mcp test
 
 install: $(PIPELINE) ## Run the full pipeline (all stages above, in order)
 	@$(OK) "Ghidra Bundle installed. Run 'make run' to launch Ghidra."

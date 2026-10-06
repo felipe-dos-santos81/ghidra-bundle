@@ -205,3 +205,13 @@ The implementation is not complete until each of these is demonstrated:
   (what it proves, runtime, `UPDATE_SNAPSHOTS=1`).
 - `AGENTS.md`: `make test` replaces `verify-extensions` in the pre-merge
   checklist; a short "adding a test fixture" note.
+
+## 10. Amendments (2026-10-06, from reading the loaders while planning)
+
+1. LE objects are `0x20` bytes each: lx-loader reads the final page of every object with the header's last-page size.
+2. DOS adds `function entry contains DosTerminateErrorCode`, proving GhidraDosToolbox's `DosSyscallAnalyzer` runs (it names `INT 21h, AH=4Ch` from `data/x86_msdos6_interrupt_functions`).
+3. ELF facts: `loader`, `relocations >= 2`, `function helper decompiles`, `function compute contains 0x1234abcd`, `function compute contains counter`, `function compute calls helper`.
+4. The runner checks extensions with `make verify-extensions INSTALL_DIR=<install>` so it can test a copy of the install.
+5. The GhidraMCP check calls `POST /run_analysis` first; the headless server imports without analyzing.
+6. The runner and every headless run need the project directory to exist; the runner creates `$WORK/proj`.
+7. A missing GhidraMCP jar is reported as a FAIL (the jar lookup uses a nullglob-guarded array), not a script abort.
