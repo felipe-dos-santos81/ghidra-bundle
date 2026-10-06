@@ -70,5 +70,7 @@ fi
 echo "Building Ghidra distribution zip..."
 ./gradlew buildGhidra --console=plain
 
+GHIDRA_VERSION="$(sed -n 's/^application\.version=//p' Ghidra/application.properties)"
+
 echo "Ghidra build complete. Output artifacts:"
-ls -lh build/dist/ghidra_12.1.2_*.zip
+ls -lh build/dist/ghidra_"${GHIDRA_VERSION}"_*.zip

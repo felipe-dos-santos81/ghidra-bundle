@@ -11,10 +11,13 @@ SHELL := /bin/bash
 
 SERVICE = Ghidra Bundle
 
+# Ghidra version (must match the tag checked out in the ghidra submodule)
+GHIDRA_VERSION := 12.1.4
+
 # Directories
 BUNDLE_DIR := $(CURDIR)
 DIST_DIR = $(BUNDLE_DIR)/dist
-INSTALL_DIR = $(DIST_DIR)/ghidra_12.1.2_PUBLIC
+INSTALL_DIR = $(DIST_DIR)/ghidra_$(GHIDRA_VERSION)_PUBLIC
 PORTABLE_DIR = $(INSTALL_DIR)/portable
 VENV_DIR = $(BUNDLE_DIR)/.venv
 
@@ -151,8 +154,8 @@ checkout: 01-checkout
 
 # ── Stage 2: Build Ghidra ─────────────────────────────────────────────────────
 
-02-build-ghidra: 01-checkout ## Build Ghidra 12.1.2 from source via build-ghidra.sh
-	@if compgen -G "ghidra/build/dist/ghidra_12.1.2_*.zip" > /dev/null; then \
+02-build-ghidra: 01-checkout ## Build Ghidra from source via build-ghidra.sh
+	@if compgen -G "ghidra/build/dist/ghidra_$(GHIDRA_VERSION)_*.zip" > /dev/null; then \
 		echo "Ghidra distribution zip already exists in ghidra/build/dist/, skipping."; \
 	else \
 		./build-ghidra.sh; \
@@ -166,7 +169,7 @@ build-ghidra: 02-build-ghidra
 	@if [ -d "$(INSTALL_DIR)" ] && [ -f "$(INSTALL_DIR)/support/launch.properties" ] && grep -q "^# --- Portable Mode Overrides ---" "$(INSTALL_DIR)/support/launch.properties"; then \
 		echo "Ghidra install directory $(INSTALL_DIR) already exists and configured, skipping."; \
 	else \
-		ZIP_FILE=$$(ls -1t ghidra/build/dist/ghidra_12.1.2_*.zip 2>/dev/null | head -n 1); \
+		ZIP_FILE=$$(ls -1t ghidra/build/dist/ghidra_$(GHIDRA_VERSION)_*.zip 2>/dev/null | head -n 1); \
 		if [ -z "$$ZIP_FILE" ]; then \
 			echo "ERROR: No Ghidra zip found in ghidra/build/dist/"; \
 			exit 1; \
@@ -174,7 +177,7 @@ build-ghidra: 02-build-ghidra
 		echo "Extracting $$ZIP_FILE to $(DIST_DIR)..."; \
 		mkdir -p "$(DIST_DIR)"; \
 		unzip -q -o "$$ZIP_FILE" -d "$(DIST_DIR)"; \
-		EXTRACTED_DIR=$$(ls -d $(DIST_DIR)/ghidra_12.1.2_* | head -n 1); \
+		EXTRACTED_DIR=$$(ls -d $(DIST_DIR)/ghidra_$(GHIDRA_VERSION)_* | head -n 1); \
 		if [ "$$EXTRACTED_DIR" != "$(INSTALL_DIR)" ]; then \
 			echo "Normalizing $$EXTRACTED_DIR to $(INSTALL_DIR)..."; \
 			rm -rf "$(INSTALL_DIR)"; \
@@ -201,15 +204,13 @@ install-ghidra: 03-install-ghidra
 
 MCP_EXT_DIR = $(INSTALL_DIR)/Ghidra/Extensions/GhidraMCP
 
-04-install-mcp: 03-install-ghidra ## Build GhidraMCP extension and install to Ghidra/Extensions/
+04-install-mcp: 03-install-ghidra ## Build GhidraMCP extension using ghidra/gradlew
 	@if [ -d "$(MCP_EXT_DIR)" ]; then \
 		echo "GhidraMCP extension already installed at $(MCP_EXT_DIR), skipping."; \
 	else \
-		echo "Preparing Ghidra JAR dependencies for Maven..."; \
-		(cd ghidra-mcp && python3 -m tools.setup install-ghidra-deps --ghidra-path "$(INSTALL_DIR)") || exit 1; \
-		echo "Building GhidraMCP extension package..."; \
-		(cd ghidra-mcp && python3 -m tools.setup build) || exit 1; \
-		$(call install_extension_zip,ghidra-mcp/target/GhidraMCP-*.zip,$(MCP_EXT_DIR)); \
+		echo "Building GhidraMCP extension using ghidra Gradle wrapper..."; \
+		(cd ghidra-mcp && ../ghidra/gradlew -p . -PGHIDRA_INSTALL_DIR="$(INSTALL_DIR)" buildExtension) || exit 1; \
+		$(call install_extension_zip,ghidra-mcp/build/distributions/GhidraMCP-*.zip,$(MCP_EXT_DIR)); \
 		printf '\033[32mGhidraMCP extension installed successfully.\033[0m\n'; \
 	fi
 

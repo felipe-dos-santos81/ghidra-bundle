@@ -1,12 +1,12 @@
 # Ghidra Bundle
 
-A fully self-contained, isolated Ghidra 12.1.2 installation bundled with [GhidraMCP](https://github.com/bethington/ghidra-mcp), [lx-loader](https://github.com/yetmorecode/ghidra-lx-loader), [GhidraDosToolbox](https://github.com/plaes/GhidraDosToolbox), and a local Model Context Protocol (MCP) bridge.
+A fully self-contained, isolated Ghidra 12.1.4 installation bundled with [GhidraMCP](https://github.com/bethington/ghidra-mcp), [lx-loader](https://github.com/yetmorecode/ghidra-lx-loader), [GhidraDosToolbox](https://github.com/plaes/GhidraDosToolbox), and a local Model Context Protocol (MCP) bridge.
 
 ---
 
 ## Features
 
-- **Strict Isolation**: Runs in full portable mode (`JAVA_HOME_OVERRIDE`, `application.settingsdir`, `application.cachedir`, and `application.tempdir` redirected to `dist/ghidra_12.1.2_PUBLIC/portable/`). Your system `~/.ghidra` remains completely untouched.
+- **Strict Isolation**: Runs in full portable mode (`JAVA_HOME_OVERRIDE`, `application.settingsdir`, `application.cachedir`, and `application.tempdir` redirected to `dist/ghidra_12.1.4_PUBLIC/portable/`). Your system `~/.ghidra` remains completely untouched.
 - **Pre-installed Extensions**: Built from source and installed into `<install>/Ghidra/Extensions/` for native discovery:
   - **GhidraMCP**: Exposes Ghidra's decompilation, disassembly, symbol, and analysis tools to AI assistants via HTTP and MCP.
   - **lx-loader**: Adds support for Linear Executable (`LX` / `LE`) binaries (OS/2, DOS extenders like DOS/4GW).
@@ -22,7 +22,7 @@ A fully self-contained, isolated Ghidra 12.1.2 installation bundled with [Ghidra
 | Tool | Version / Note | macOS | Linux (Debian/Ubuntu) |
 | :--- | :--- | :--- | :--- |
 | **JDK 21** | Required by Ghidra 12+ | `brew install --cask temurin@21` | `sudo apt install -y openjdk-21-jdk` |
-| **Maven** | Required to stage Ghidra JAR dependencies for MCP | `brew install maven` | `sudo apt install -y maven` |
+| **Maven** | Checked by `make env`; the default build uses Gradle, so only needed for GhidraMCP's own Maven tooling | `brew install maven` | `sudo apt install -y maven` |
 | **Clang** | Required to compile Ghidra native decompiler | `xcode-select --install` | `sudo apt install -y clang` |
 | **Python** | 3.10 or newer | `brew install python@3.12` | `sudo apt install -y python3 python3-venv` |
 | **uv** | Fast Python package manager | `brew install uv` | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
@@ -60,7 +60,7 @@ This single command executes the complete pipeline:
 1. Installs missing OS packages and `uv` (`00-deps`, uses `sudo apt` on Linux / `brew` on macOS)
 2. Validates host dependencies (`00-env`)
 3. Synchronizes submodules (`01-checkout`)
-4. Builds Ghidra 12.1.2 from source (`02-build-ghidra`)
+4. Builds Ghidra 12.1.4 from source (`02-build-ghidra`)
 5. Extracts to `dist/` and configures portable mode (`03-install-ghidra`)
 6. Builds and installs GhidraMCP (`04-install-mcp`)
 7. Builds and installs lx-loader (`05-install-lx-loader`)
@@ -101,12 +101,12 @@ ghidra-bundle/
 ├── build-ghidra.sh              # Headless Ghidra source build script
 ├── .gitmodules                  # Pinned upstream submodules
 ├── dist/                        # Extracted Ghidra distribution (ignored in git)
-│   └── ghidra_12.1.2_PUBLIC/
+│   └── ghidra_12.1.4_PUBLIC/
 │       ├── ghidraRun            # Launch executable
 │       ├── Ghidra/Extensions/   # Installed extensions (GhidraMCP, lx-loader, GhidraDosToolbox)
 │       └── portable/            # Isolated settings/, cache/, and temp/
 ├── .venv/                       # Python virtual environment (ignored in git)
-├── ghidra/                      # NSA Ghidra submodule (tag Ghidra_12.1.2_build)
+├── ghidra/                      # NSA Ghidra submodule (tag Ghidra_12.1.4_build)
 ├── ghidra-mcp/                  # GhidraMCP submodule
 ├── lx-loader/                   # ghidra-lx-loader submodule
 └── dos-toolbox/                 # GhidraDosToolbox submodule (branch wip-ghidra-12)
@@ -122,7 +122,7 @@ ghidra-bundle/
 | `make deps` | Installs missing OS packages (`sudo apt` on Linux, `brew` on macOS) and `uv` |
 | `make env` | Validates host prerequisites (JDK 21, Maven, Clang, Python, uv, Git) |
 | `make checkout` | Initializes and updates Git submodules with `--depth 1` |
-| `make build-ghidra` | Compiles Ghidra 12.1.2 distribution zip |
+| `make build-ghidra` | Compiles Ghidra 12.1.4 distribution zip |
 | `make install-ghidra` | Extracts Ghidra distribution into `dist/` and patches `launch.properties` |
 | `make install-mcp` | Builds and installs GhidraMCP extension |
 | `make install-lx-loader` | Builds and installs lx-loader extension (with release fallback) |

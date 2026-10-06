@@ -6,8 +6,8 @@ This document provides operational context, architectural invariants, and develo
 
 ## 1. Project Overview
 
-`ghidra-bundle` provides an automated, completely isolated, reproducible build and runtime environment for **Ghidra 12.1.2** with three pre-installed extensions and a local Model Context Protocol (MCP) bridge:
-- **Ghidra 12.1.2**: Built from source via headless Gradle (`Ghidra_12.1.2_build` tag).
+`ghidra-bundle` provides an automated, completely isolated, reproducible build and runtime environment for **Ghidra 12.1.4** with three pre-installed extensions and a local Model Context Protocol (MCP) bridge:
+- **Ghidra 12.1.4**: Built from source via headless Gradle (`Ghidra_12.1.4_build` tag).
 - **GhidraMCP**: AI reverse-engineering server plugin (port 8089) and Python bridge (`bridge-mcp-ghidra`).
 - **lx-loader**: Linear Executable (`LX`/`LE`) binary loader (OS/2, DOS/4GW).
 - **GhidraDosToolbox**: MS-DOS memory segmentation, Borland Pascal overlays, and interrupt vector analyzers (`wip-ghidra-12` branch).
@@ -27,19 +27,19 @@ Agents modifying or extending this codebase must strictly adhere to the followin
   VMARGS=-Dapplication.cachedir=${INSTALL_DIR}/portable/cache
   VMARGS=-Dapplication.tempdir=${INSTALL_DIR}/portable/temp
   ```
-- All user preferences, project caches, and temporary files must reside under `dist/ghidra_12.1.2_PUBLIC/portable/`.
+- All user preferences, project caches, and temporary files must reside under `dist/ghidra_12.1.4_PUBLIC/portable/`.
 - When verifying the patch idempotency, grep specifically for `^# --- Portable Mode Overrides ---` (do not grep for `application.settingsdir`, which matches upstream commented lines).
 
 ### 2.2 Extension Placement
-- All installed extensions must reside under `dist/ghidra_12.1.2_PUBLIC/Ghidra/Extensions/<ExtensionName>`:
-  - `dist/ghidra_12.1.2_PUBLIC/Ghidra/Extensions/GhidraMCP`
-  - `dist/ghidra_12.1.2_PUBLIC/Ghidra/Extensions/ghidra-lx-loader`
-  - `dist/ghidra_12.1.2_PUBLIC/Ghidra/Extensions/GhidraDosToolbox`
+- All installed extensions must reside under `dist/ghidra_12.1.4_PUBLIC/Ghidra/Extensions/<ExtensionName>`:
+  - `dist/ghidra_12.1.4_PUBLIC/Ghidra/Extensions/GhidraMCP`
+  - `dist/ghidra_12.1.4_PUBLIC/Ghidra/Extensions/ghidra-lx-loader`
+  - `dist/ghidra_12.1.4_PUBLIC/Ghidra/Extensions/GhidraDosToolbox`
 - Ghidra's `GhidraApplicationLayout` automatically discovers extensions in this directory.
 
 ### 2.3 Submodule Tracking
 - Upstream repositories are tracked as shallow Git submodules:
-  - `ghidra` (NSA, tag `Ghidra_12.1.2_build`)
+  - `ghidra` (NSA, tag `Ghidra_12.1.4_build`)
   - `ghidra-mcp` (bethington/ghidra-mcp, `main`)
   - `lx-loader` (yetmorecode/ghidra-lx-loader, `master`)
   - `dos-toolbox` (plaes/GhidraDosToolbox, `wip-ghidra-12`)
@@ -74,7 +74,7 @@ The build pipeline is sequenced using numbered targets:
 | `01` | `01-checkout` (`checkout`) | Fetches submodules (`--depth 1`) |
 | `02` | `02-build-ghidra` (`build-ghidra`) | Runs headless build script `build-ghidra.sh` |
 | `03` | `03-install-ghidra` (`install-ghidra`) | Extracts zip to `dist/`, patches `launch.properties` |
-| `04` | `04-install-mcp` (`install-mcp`) | Staged Maven deps, builds GhidraMCP, installs zip |
+| `04` | `04-install-mcp` (`install-mcp`) | Builds GhidraMCP via `ghidra/gradlew` against the install, installs zip |
 | `05` | `05-install-lx-loader` (`install-lx-loader`) | Builds lx-loader via `ghidra/gradlew` (with release fallback) |
 | `06` | `06-install-dos-toolbox` (`install-dos-toolbox`)| Builds GhidraDosToolbox via `ghidra/gradlew` |
 | `07` | `07-venv` (`venv`) | Creates `.venv` and installs `bridge-mcp-ghidra` |
