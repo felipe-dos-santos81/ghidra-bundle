@@ -30,6 +30,7 @@ public class SanityCheck extends GhidraScript {
 
 	private final Map<Function, String> decompiled = new HashMap<>();
 	private DecompInterface decompiler;
+	private boolean opened;
 	private File outDir;
 	private int passed;
 	private int failed;
@@ -45,7 +46,7 @@ public class SanityCheck extends GhidraScript {
 		outDir = new File(args[1]);
 		outDir.mkdirs();
 		decompiler = new DecompInterface();
-		decompiler.openProgram(currentProgram);
+		opened = decompiler.openProgram(currentProgram);
 		try {
 			for (String line : Files.readAllLines(new File(args[0]).toPath(), StandardCharsets.UTF_8)) {
 				String fact = line.replaceFirst("#.*$", "").trim();
@@ -203,19 +204,36 @@ public class SanityCheck extends GhidraScript {
 		if (c != null) {
 			return c;
 		}
-		DecompileResults r = decompiler.decompileFunction(f, 60, monitor);
-		if (r.failedToStart()) {
-			c = DECOMPILE_FAILED + "native decompiler did not start: " + r.getErrorMessage();
-		}
-		else if (!r.decompileCompleted() || r.getDecompiledFunction() == null) {
-			c = DECOMPILE_FAILED + r.getErrorMessage();
+		if (!opened) {
+			c = notStarted(null);
 		}
 		else {
-			c = r.getDecompiledFunction().getC();
+			DecompileResults r = decompiler.decompileFunction(f, 60, monitor);
+			if (r.failedToStart()) {
+				c = notStarted(r.getErrorMessage());
+			}
+			else if (!r.decompileCompleted() || r.getDecompiledFunction() == null) {
+				c = DECOMPILE_FAILED + reason(r.getErrorMessage());
+			}
+			else {
+				c = r.getDecompiledFunction().getC();
+			}
 		}
 		decompiled.put(f, c);
 		Files.writeString(fileFor(f).toPath(), c, StandardCharsets.UTF_8);
 		return c;
+	}
+
+	private String notStarted(String message) {
+		return DECOMPILE_FAILED + "native decompiler did not start: " + reason(message);
+	}
+
+	/** The decompiler's own message, else its last message, else a placeholder; never empty. */
+	private String reason(String message) {
+		if (message == null || message.isBlank()) {
+			message = decompiler.getLastMessage();
+		}
+		return message == null || message.isBlank() ? "no message from the decompiler" : message;
 	}
 
 	private File fileFor(Function f) {
