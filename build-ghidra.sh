@@ -1,68 +1,25 @@
 #!/bin/bash
+# Builds the Ghidra distribution zip from the ghidra submodule into
+# ghidra/build/dist/. Run it via `make build-ghidra`, which exports JAVA_HOME
+# for JDK 21.
 set -euo pipefail
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-GHIDRA_SRC_DIR="$REPO_DIR/ghidra"
+GHIDRA_SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ghidra"
 
-if [[ ! -d "$GHIDRA_SRC_DIR" ]]; then
-  echo "ERROR: $GHIDRA_SRC_DIR does not exist. Run 'make checkout' first."
+if [[ ! -x "$GHIDRA_SRC_DIR/gradlew" ]]; then
+  echo "ERROR: $GHIDRA_SRC_DIR/gradlew not found. Run 'make checkout' first." >&2
   exit 1
 fi
-
-cd "$GHIDRA_SRC_DIR"
-
-resolve_java_home_linux() {
-  if [[ -n "${JAVA_HOME:-}" && -x "$JAVA_HOME/bin/java" ]] && "$JAVA_HOME/bin/java" -version 2>&1 | grep -q 'version "21'; then
-    readlink -f "$JAVA_HOME"
-    return 0
-  fi
-  local p found=""
-  for p in /usr/lib/jvm/java-21* /usr/lib/jvm/openjdk-21* /usr/lib/jvm/*21*; do
-    if [[ -d "$p" && -x "$p/bin/java" ]] && "$p/bin/java" -version 2>&1 | grep -q 'version "21'; then
-      found="$(readlink -f "$p")"
-      break
-    fi
-  done
-  if [[ -n "$found" ]]; then
-    echo "$found"
-    return 0
-  fi
-  if command -v javac >/dev/null 2>&1; then
-    local javac_path resolved candidate
-    javac_path="$(command -v javac)"
-    resolved="$(readlink -f "$javac_path")"
-    candidate="$(dirname "$(dirname "$resolved")")"
-    if [[ -x "$candidate/bin/java" ]] && "$candidate/bin/java" -version 2>&1 | grep -q 'version "21'; then
-      echo "$candidate"
-      return 0
-    fi
-  fi
-  echo ""
-}
-
-OS="$(uname -s)"
-if [[ "$OS" == "Darwin" ]]; then
-  JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -F -v 21 2>/dev/null || true)}"
-else
-  JAVA_HOME="${JAVA_HOME:-$(resolve_java_home_linux)}"
-fi
-export JAVA_HOME
-
-if [[ -z "$JAVA_HOME" || ! -d "$JAVA_HOME" ]]; then
-  echo "ERROR: JAVA_HOME for JDK 21 could not be resolved."
+if [[ -z "${JAVA_HOME:-}" ]] || ! "$JAVA_HOME/bin/java" -version 2>&1 | grep -q 'version "21'; then
+  echo "ERROR: JAVA_HOME must point to a JDK 21 (got '${JAVA_HOME:-}'). Run 'make build-ghidra'." >&2
   exit 1
 fi
 export PATH="$JAVA_HOME/bin:$PATH"
-
 echo "Using JAVA_HOME=$JAVA_HOME"
-java -version
 
-if [[ ! -x "./gradlew" ]]; then
-  echo "ERROR: ./gradlew not executable in $GHIDRA_SRC_DIR"
-  exit 1
-fi
+cd "$GHIDRA_SRC_DIR"
 
-if [[ ! -d "dependencies/flatRepo" ]]; then
+if [[ ! -d dependencies/flatRepo ]]; then
   echo "Fetching Ghidra build dependencies..."
   ./gradlew -I gradle/support/fetchDependencies.gradle
 fi
@@ -70,7 +27,5 @@ fi
 echo "Building Ghidra distribution zip..."
 ./gradlew buildGhidra --console=plain
 
-GHIDRA_VERSION="$(sed -n 's/^application\.version=//p' Ghidra/application.properties)"
-
-echo "Ghidra build complete. Output artifacts:"
-ls -lh build/dist/ghidra_"${GHIDRA_VERSION}"_*.zip
+version="$(sed -n 's/^application\.version=//p' Ghidra/application.properties)"
+ls -lh build/dist/ghidra_"${version}"_*.zip
