@@ -1,0 +1,7 @@
+# sample.o: i386 ELF relocatable, Ghidra's own ELF loader.
+loader Executable and Linking Format (ELF)
+relocations >= 2                    # counter (R_386_32) and the call to helper (R_386_PC32)
+function helper decompiles
+function compute contains 0x1234abcd
+function compute contains counter   # relocation resolved to the global's symbol
+function compute calls helper
