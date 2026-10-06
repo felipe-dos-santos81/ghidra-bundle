@@ -128,7 +128,7 @@ ghidra-bundle/
 | `make build-ghidra` | Compiles Ghidra 12.1.4 distribution zip |
 | `make install-ghidra` | Extracts Ghidra distribution into `dist/` and patches `launch.properties` |
 | `make install-mcp` | Builds and installs GhidraMCP extension |
-| `make install-lx-loader` | Builds and installs lx-loader extension (with release fallback) |
+| `make install-lx-loader` | Builds and installs lx-loader extension |
 | `make install-dos-toolbox`| Builds and installs GhidraDosToolbox extension |
 | `make venv` | Configures Python virtualenv and installs `bridge-mcp-ghidra` |
 | `make register-mcp` | Registers MCP bridge with opencode (`~/.config/opencode/opencode.json`) and Claude Code (`claude mcp add --scope user`) |

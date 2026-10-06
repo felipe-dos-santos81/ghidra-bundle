@@ -219,20 +219,14 @@ install-mcp: 04-install-mcp
 # ── Stage 5: Install lx-loader Extension ──────────────────────────────────────
 
 LX_LOADER_DIR = $(INSTALL_DIR)/Ghidra/Extensions/ghidra-lx-loader
-LX_LOADER_FALLBACK_URL = https://github.com/yetmorecode/ghidra-lx-loader/releases/download/v12.0.1/ghidra_12.0.1_PUBLIC_20260129_ghidra-lx-loader.zip
 
 05-install-lx-loader: 03-install-ghidra ## Build lx-loader extension using ghidra/gradlew
 	@if [ -d "$(LX_LOADER_DIR)" ]; then \
 		echo "lx-loader extension already installed at $(LX_LOADER_DIR), skipping."; \
 	else \
 		echo "Building lx-loader extension using ghidra Gradle wrapper..."; \
-		if (cd lx-loader && ../ghidra/gradlew -p . -PGHIDRA_INSTALL_DIR="$(INSTALL_DIR)" buildExtension); then \
-			$(call install_extension_zip,lx-loader/dist/*.zip,$(LX_LOADER_DIR),lx-loader); \
-		else \
-			printf '\033[33mWARNING: lx-loader buildExtension failed. Falling back to release zip...\033[0m\n'; \
-			curl -f -L -o lx-loader/fallback.zip "$(LX_LOADER_FALLBACK_URL)" || exit 1; \
-			$(call install_extension_zip,lx-loader/fallback.zip,$(LX_LOADER_DIR),lx-loader); \
-		fi; \
+		(cd lx-loader && ../ghidra/gradlew -p . -PGHIDRA_INSTALL_DIR="$(INSTALL_DIR)" buildExtension) || exit 1; \
+		$(call install_extension_zip,lx-loader/dist/ghidra_$(GHIDRA_VERSION)_*_lx-loader.zip,$(LX_LOADER_DIR),lx-loader); \
 		printf '\033[32mlx-loader extension installed successfully.\033[0m\n'; \
 	fi
 
@@ -369,7 +363,7 @@ clean: ## Remove build outputs (dist/, .venv/, repo target/dist artifacts)
 	@rm -rf $(DIST_DIR) $(VENV_DIR) \
 		ghidra/build \
 		ghidra-mcp/target ghidra-mcp/build \
-		lx-loader/dist lx-loader/build lx-loader/.gradle lx-loader/fallback.zip \
+		lx-loader/dist lx-loader/build lx-loader/.gradle \
 		dos-toolbox/dist dos-toolbox/build dos-toolbox/.gradle
 	@printf '\033[32mClean complete.\033[0m\n'
 
