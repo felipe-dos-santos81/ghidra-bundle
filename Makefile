@@ -242,7 +242,7 @@ DOS_TOOLBOX_DIR = $(INSTALL_DIR)/Ghidra/Extensions/GhidraDosToolbox
 	else \
 		echo "Building GhidraDosToolbox extension using ghidra Gradle wrapper..."; \
 		(cd dos-toolbox && ../ghidra/gradlew -p . -PGHIDRA_INSTALL_DIR="$(INSTALL_DIR)" buildExtension) || exit 1; \
-		$(call install_extension_zip,dos-toolbox/dist/*.zip,$(DOS_TOOLBOX_DIR),dos-toolbox); \
+		$(call install_extension_zip,dos-toolbox/dist/ghidra_$(GHIDRA_VERSION)_*_dos-toolbox.zip,$(DOS_TOOLBOX_DIR),dos-toolbox); \
 		printf '\033[32mGhidraDosToolbox extension installed successfully.\033[0m\n'; \
 	fi
 
