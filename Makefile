@@ -269,7 +269,7 @@ install-dos-toolbox: 06-install-dos-toolbox
 
 venv: 07-venv
 
-# ── Stage 8: opencode MCP Registration ────────────────────────────────────────
+# ── Stage 8: opencode + Claude Code MCP Registration ──────────────────────────
 
 OPENCODE_CONFIG = $(HOME)/.config/opencode/opencode.json
 
@@ -298,10 +298,19 @@ else:
 endef
 export REGISTER_SCRIPT
 
-08-register-mcp: 07-venv ## Register bridge-mcp-ghidra in ~/.config/opencode/opencode.json
+08-register-mcp: 07-venv ## Register bridge-mcp-ghidra with opencode and Claude Code (user scope)
 	@echo "Registering bridge-mcp-ghidra with opencode..."
 	@mkdir -p "$$(dirname "$(OPENCODE_CONFIG)")"
 	@python3 -c "$$REGISTER_SCRIPT"
+	@echo "Registering bridge-mcp-ghidra with Claude Code..."
+	@if ! command -v claude >/dev/null 2>&1; then \
+		printf '\033[33mclaude CLI not found on PATH, skipping Claude Code registration.\033[0m\n'; \
+	elif claude mcp get ghidra 2>/dev/null | grep -qF "$(BRIDGE_BIN)"; then \
+		echo "Ghidra MCP server already registered in Claude Code"; \
+	else \
+		claude mcp remove ghidra --scope user >/dev/null 2>&1 || true; \
+		claude mcp add --scope user ghidra -- "$(BRIDGE_BIN)" || exit 1; \
+	fi
 	@printf '\033[32mMCP registration complete.\033[0m\n'
 
 register-mcp: 08-register-mcp

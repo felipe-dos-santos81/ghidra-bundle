@@ -12,7 +12,7 @@ A fully self-contained, isolated Ghidra 12.1.4 installation bundled with [Ghidra
   - **lx-loader**: Adds support for Linear Executable (`LX` / `LE`) binaries (OS/2, DOS extenders like DOS/4GW).
   - **GhidraDosToolbox**: Specialized DOS memory segmentation, Borland Pascal overlays, and interrupt vector analyzers.
 - **Python Bridge in Dedicated Virtualenv**: Local Python environment (`.venv/`) with `bridge-mcp-ghidra` installed in editable mode.
-- **Automated MCP Client Registration**: Atomically registers the server with `~/.config/opencode/opencode.json` under `mcp.ghidra`.
+- **Automated MCP Client Registration**: Atomically registers the server with `~/.config/opencode/opencode.json` under `mcp.ghidra`, and with Claude Code (user scope, server name `ghidra`) when the `claude` CLI is installed.
 - **Reproducible Submodules**: Upstream repositories are tracked as shallow Git submodules pinned to stable commits and release tags.
 
 ---
@@ -66,7 +66,7 @@ This single command executes the complete pipeline:
 7. Builds and installs lx-loader (`05-install-lx-loader`)
 8. Builds and installs GhidraDosToolbox (`06-install-dos-toolbox`)
 9. Creates Python `.venv` and installs `bridge-mcp-ghidra` (`07-venv`)
-10. Registers the MCP bridge in `~/.config/opencode/opencode.json` (`08-register-mcp`)
+10. Registers the MCP bridge with opencode and Claude Code (`08-register-mcp`)
 
 ---
 
@@ -90,6 +90,9 @@ Once Ghidra is running with the GhidraMCP plugin enabled in the CodeBrowser:
 make verify
 ```
 *Probes `http://127.0.0.1:8089/check_connection`.*
+
+### Using with Claude Code
+`make register-mcp` adds the bridge as the user-scoped `ghidra` MCP server, so it is available in every Claude Code session. With Ghidra running, `claude mcp get ghidra` should report it as connected; restart open Claude Code sessions to pick it up.
 
 ---
 
@@ -128,7 +131,7 @@ ghidra-bundle/
 | `make install-lx-loader` | Builds and installs lx-loader extension (with release fallback) |
 | `make install-dos-toolbox`| Builds and installs GhidraDosToolbox extension |
 | `make venv` | Configures Python virtualenv and installs `bridge-mcp-ghidra` |
-| `make register-mcp` | Atomically registers MCP bridge in `~/.config/opencode/opencode.json` |
+| `make register-mcp` | Registers MCP bridge with opencode (`~/.config/opencode/opencode.json`) and Claude Code (`claude mcp add --scope user`) |
 | `make install` | Installs OS deps, then runs the full pipeline end-to-end |
 | `make run` | Starts the isolated Ghidra instance |
 | `make run-bridge` | Runs the MCP bridge server |

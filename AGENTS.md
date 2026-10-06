@@ -78,7 +78,7 @@ The build pipeline is sequenced using numbered targets:
 | `05` | `05-install-lx-loader` (`install-lx-loader`) | Builds lx-loader via `ghidra/gradlew` (with release fallback) |
 | `06` | `06-install-dos-toolbox` (`install-dos-toolbox`)| Builds GhidraDosToolbox via `ghidra/gradlew` |
 | `07` | `07-venv` (`venv`) | Creates `.venv` and installs `bridge-mcp-ghidra` |
-| `08` | `08-register-mcp` (`register-mcp`) | Atomically writes to `~/.config/opencode/opencode.json` |
+| `08` | `08-register-mcp` (`register-mcp`) | Atomically writes to `~/.config/opencode/opencode.json`; registers user-scoped `ghidra` server via `claude mcp add` (skipped if `claude` is absent) |
 
 ### Runtime & Maintenance Targets
 - `make install`: Executes stages 00 through 08 sequentially.
