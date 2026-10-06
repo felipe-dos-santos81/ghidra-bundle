@@ -91,16 +91,19 @@ run_fixture le "$WORK/fixtures/le.exe" LeLoader
 
 # ── 3b. GhidraMCP end to end ──────────────────────────────────────────────────
 check_mcp() {
-  local url="http://127.0.0.1:$MCP_PORT" cp jar i out compute
+  local url="http://127.0.0.1:$MCP_PORT" cp jar i out compute jars
   if (exec 3<>"/dev/tcp/127.0.0.1/$MCP_PORT") 2>/dev/null; then
     fail "GhidraMCP: port $MCP_PORT is already in use (set TEST_MCP_PORT to a free port)"
     return
   fi
-  cp=$(ls "$INSTALL_DIR"/Ghidra/Extensions/GhidraMCP/lib/GhidraMCP-*.jar 2>/dev/null | head -n 1)
-  if [[ -z "$cp" ]]; then
+  shopt -s nullglob
+  jars=("$INSTALL_DIR"/Ghidra/Extensions/GhidraMCP/lib/GhidraMCP-*.jar)
+  shopt -u nullglob
+  if ((${#jars[@]} == 0)); then
     fail "GhidraMCP: no GhidraMCP jar in $INSTALL_DIR/Ghidra/Extensions/GhidraMCP/lib"
     return
   fi
+  cp=${jars[0]}
   for jar in "$INSTALL_DIR"/Ghidra/{Framework,Features,Processors}/*/lib/*.jar; do
     cp+=":$jar"
   done
