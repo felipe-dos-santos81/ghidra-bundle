@@ -1,0 +1,8 @@
+# dos.exe: 16-bit DOS MZ, imported with GhidraDosToolbox's DosLoader (load segment 0x1000).
+loader Old-style DOS Executable (MZ)(Experimental)
+entry 1000:0000
+relocations >= 1
+bytes 1000:0001 0210                         # data segment word 0x0002 relocated to 0x1002
+function entry calls 1000:0010
+function 1000:0010 contains 0xabcd
+function entry contains DosTerminateErrorCode  # DosSyscallAnalyzer named INT 21h / AH=4Ch

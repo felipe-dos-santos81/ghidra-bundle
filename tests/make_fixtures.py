@@ -3,6 +3,7 @@
 
 Usage: python3 -I tests/make_fixtures.py OUTPUT_DIR
 
+  dos.exe  16-bit DOS MZ with one segment relocation (GhidraDosToolbox DosLoader)
   le.exe   32-bit LE behind an MZ stub with one 32-bit fixup (lx-loader LeLoader)
 
 Every byte is fixed, so tests/expect/*.txt can name exact addresses.
@@ -88,13 +89,42 @@ def build_le() -> bytes:
     return bytes(image)
 
 
+def build_dos() -> bytes:
+    """Old-style MZ (relocation table at 0x1C, so no NE/LE header is implied).
+
+    Load module: code in paragraphs 0-1, data in paragraph 2.
+    """
+    code = bytes([
+        0xB8, 0x02, 0x00,  # 0000 mov ax, 0x0002   (data segment; relocated)
+        0x8E, 0xD8,        # 0003 mov ds, ax
+        0xE8, 0x08, 0x00,  # 0005 call 0x0010      (helper)
+        0xA3, 0x00, 0x00,  # 0008 mov [0x0000], ax
+        0xB8, 0x00, 0x4C,  # 000B mov ax, 0x4C00   (terminate, exit code 0)
+        0xCD, 0x21,        # 000E int 0x21
+        0xB8, 0xCD, 0xAB,  # 0010 mov ax, 0xABCD   (helper)
+        0xC3,              # 0013 ret
+    ])
+    module = code + bytes(0x20 - len(code)) + b"TESTDATA" + bytes(8)
+    header_size = 0x20                                   # 0x1C header + one relocation
+    size = header_size + len(module)
+    header = struct.pack("<2s13H", b"MZ", size % 512, (size + 511) // 512,
+                         1,            # relocations
+                         header_size // 16,
+                         0, 0xFFFF,    # min/max extra paragraphs
+                         0x0002, 0x0010,  # ss:sp
+                         0, 0, 0,      # checksum, ip, cs
+                         0x1C, 0)      # relocation table offset, overlay
+    relocation = struct.pack("<HH", 0x0001, 0x0000)      # patch the word at 0000:0001
+    return header + relocation + module
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print(__doc__, file=sys.stderr)
         return 2
     out = Path(sys.argv[1])
     out.mkdir(parents=True, exist_ok=True)
-    for name, build in (("le.exe", build_le),):
+    for name, build in (("dos.exe", build_dos), ("le.exe", build_le)):
         path = out / name
         path.write_bytes(build())
         print(f"wrote {path} ({path.stat().st_size} bytes)")
