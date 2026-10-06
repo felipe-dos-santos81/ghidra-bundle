@@ -61,7 +61,7 @@ help: ## Show this help
 00-deps: ## Install missing OS packages (apt or brew) and uv
 	@if [ "$(UNAME_S)" = "Darwin" ]; then \
 		[ -d "$(JAVA21_HOME)" ] || brew install --cask temurin@21; \
-		for p in maven:mvn python@3.12:python3 uv:uv git:git; do \
+		for p in maven:mvn python@3.12:python3 uv:uv git:git coreutils:gtimeout; do \
 			command -v $${p#*:} >/dev/null 2>&1 || brew install $${p%%:*}; \
 		done; \
 		command -v clang >/dev/null 2>&1 || xcode-select --install; \
@@ -183,9 +183,6 @@ verify-extensions: ## Check headlessly that Ghidra loads every extension's class
 	fi
 	@$(OK) "All extension classes loaded."
 
-test: ## Run the sanity test suite (fixtures, decompiler, extensions, GhidraMCP)
-	@tests/run-sanity.sh "$(INSTALL_DIR)" "$(JAVA21_HOME)"
-
 install-mcp: 04-install-mcp
 install-lx-loader: 05-install-lx-loader
 install-dos-toolbox: 06-install-dos-toolbox
@@ -243,6 +240,10 @@ PIPELINE := 00-deps 00-env 01-checkout 02-build-ghidra 03-install-ghidra 04-inst
 
 install: $(PIPELINE) ## Run the full pipeline (all stages above, in order)
 	@$(OK) "Ghidra Bundle installed. Run 'make run' to launch Ghidra."
+
+test: ## Run the sanity test suite (fixtures, decompiler, extensions, GhidraMCP)
+	@[ -d "$(JAVA21_HOME)" ] || { $(ERR) "JDK 21 not found (run 'make deps')"; exit 1; }
+	@tests/run-sanity.sh "$(INSTALL_DIR)" "$(JAVA21_HOME)"
 
 run: ## Launch Ghidra (fails if port 8089 is already in use)
 	@[ -x "$(INSTALL_DIR)/ghidraRun" ] || { $(ERR) "Ghidra not installed; run 'make install'"; exit 1; }

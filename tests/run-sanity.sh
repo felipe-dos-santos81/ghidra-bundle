@@ -5,6 +5,8 @@
 # Usage: tests/run-sanity.sh <ghidra install dir> <JDK 21 home>
 # Env:   UPDATE_SNAPSHOTS=1  rewrite tests/snapshots/ from this run
 #        TEST_MCP_PORT=18089  port for the GhidraMCP test server (default 18089)
+#        TEST_IMPORT_TIMEOUT=600  seconds before a fixture import is killed (default 600)
+# Needs GNU timeout (Linux: coreutils; macOS: `brew install coreutils` for gtimeout).
 set -euo pipefail
 
 INSTALL_DIR=${1:?usage: run-sanity.sh <ghidra install dir> <JDK 21 home>}
@@ -26,6 +28,9 @@ for tool in clang python3 curl; do
   command -v "$tool" >/dev/null || die "$tool not found on PATH (run 'make deps')."
 done
 
+TIMEOUT=$(command -v timeout || command -v gtimeout) \
+  || die "GNU timeout not found (Linux: coreutils; macOS: brew install coreutils)."
+
 MCP_PORT="${TEST_MCP_PORT:-18089}"
 WORK=$(mktemp -d "$INSTALL_DIR/portable/temp/sanity-XXXXXX")
 MCP_PID=""
@@ -34,6 +39,7 @@ cleanup() {
     kill "$MCP_PID" 2>/dev/null || true
     wait "$MCP_PID" 2>/dev/null || true
   fi
+  pkill -f -- "$WORK" 2>/dev/null || true  # stray analysis JVMs or a server that ignored SIGTERM
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -60,6 +66,7 @@ python3 -I "$TESTS/make_fixtures.py" "$WORK/fixtures" > /dev/null
 run_fixture() {  # run_fixture <name> <file> [loader]
   local name=$1 file=$2 loader=${3:-}
   local log="$WORK/$name.log" out="$WORK/out/$name" line
+  local limit=${TEST_IMPORT_TIMEOUT:-600} status=0 lines=0 done_p done_f
   local args=("$WORK/proj" "sanity-$name" -import "$file")
   [[ -n "$loader" ]] && args+=(-loader "$loader")
   args+=(-deleteProject -scriptPath "$REPO_DIR/ghidra_scripts"
@@ -67,7 +74,15 @@ run_fixture() {  # run_fixture <name> <file> [loader]
   mkdir -p "$out"
   echo "Importing $name ($(basename "$file"), loader ${loader:-auto})..."
   # --foreground keeps analyzeHeadless in the terminal's process group so Ctrl-C reaches it.
-  timeout --foreground 600 "$HEADLESS" "${args[@]}" > "$log" 2>&1 || echo "analyzeHeadless exit status $?" >> "$log"
+  "$TIMEOUT" --foreground "$limit" "$HEADLESS" "${args[@]}" > "$log" 2>&1 || status=$?
+  ((status == 0)) || echo "analyzeHeadless exit status $status" >> "$log"
+  if ((status == 124)); then
+    # timeout only kills its direct child; analyzeHeadless's JVM keeps running.
+    pkill -f -- "$WORK/proj" || true
+    fail "$name: import timed out after $limit s (loader ${loader:-auto})"
+    tail -20 "$log" | indent
+    return
+  fi
   if ! grep -q 'Import succeeded' "$log"; then
     fail "$name: import failed (loader ${loader:-auto})"
     tail -20 "$log" | indent
@@ -75,13 +90,18 @@ run_fixture() {  # run_fixture <name> <file> [loader]
   fi
   while IFS= read -r line; do
     case "$line" in
-      PASS\ *) pass "$name: ${line#PASS }" ;;
-      FAIL\ *) fail "$name: ${line#FAIL }" ;;
+      PASS\ *) pass "$name: ${line#PASS }"; lines=$((lines + 1)) ;;
+      FAIL\ *) fail "$name: ${line#FAIL }"; lines=$((lines + 1)) ;;
     esac
   done < <(sed -nE 's/^.*SANITY (PASS|FAIL) (.*) \(GhidraScript\) *$/\1 \2/p' "$log")
-  if ! grep -q 'SANITY DONE' "$log"; then
+  read -r done_p done_f < <(sed -nE 's/^.*SANITY DONE ([0-9]+) ([0-9]+).*$/\1 \2/p' "$log" | tail -1) || true
+  if [[ -z "${done_p:-}" ]]; then
     fail "$name: SanityCheck.java did not finish"
     tail -20 "$log" | indent
+  elif ((done_p + done_f == 0)); then
+    fail "$name: no facts checked"
+  elif ((done_p + done_f != lines)); then
+    fail "$name: SanityCheck.java reported $done_p passed, $done_f failed but $lines lines were parsed"
   fi
 }
 
@@ -109,7 +129,8 @@ check_mcp() {
   done
   mkdir -p "$WORK/mcp"/{home,settings,cache,temp}
   echo "Starting GhidraMCP headless server on 127.0.0.1:$MCP_PORT..."
-  "$JAVA_HOME/bin/java" -Djava.awt.headless=true \
+  env -u GHIDRA_MCP_AUTH_TOKEN -u GHIDRA_MCP_PROJECT_FOLDER -u GHIDRA_MCP_FILE_ROOT \
+    "$JAVA_HOME/bin/java" -Djava.awt.headless=true \
     -Duser.home="$WORK/mcp/home" -Djava.io.tmpdir="$WORK/mcp/temp" \
     -Dapplication.settingsdir="$WORK/mcp/settings" \
     -Dapplication.cachedir="$WORK/mcp/cache" \
@@ -172,6 +193,10 @@ normalize() {  # drop decompiler warning comments and trailing whitespace
 report_snapshots() {
   local f rel snap changed=0
   if [[ "${UPDATE_SNAPSHOTS:-}" == 1 ]]; then
+    if ((FAILED > 0)); then
+      echo "Not updating snapshots: $FAILED check(s) failed."
+      return
+    fi
     rm -rf "$TESTS/snapshots"
     for f in "$WORK"/out/*/*.c; do
       [[ -e "$f" ]] || continue
