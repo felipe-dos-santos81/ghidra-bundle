@@ -1,0 +1,10 @@
+# le.exe: 32-bit LE behind an MZ stub, imported with lx-loader's LeLoader.
+loader Linear Executable (LE-Style DOS)
+block .object1 00010000
+block .object2 00020000
+entry 00010000
+relocations >= 1
+bytes 00010001 04000200             # fixup applied: [obj2+4] -> 0x00020004
+reference 00010000 -> 00020004
+function 00010000 contains 0x1234abcd
+function 00010000 calls 00010010
