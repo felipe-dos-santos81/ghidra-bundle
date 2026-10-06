@@ -63,7 +63,9 @@ public class SanityCheck extends GhidraScript {
 	private void report(String fact) {
 		String problem;
 		try {
-			problem = check(fact.split("\\s+"));
+			String[] t = fact.split("\\s+");
+			String shape = expectedShape(t);
+			problem = shape != null ? "unparseable fact (expected: " + shape + ")" : check(t);
 		}
 		catch (Exception e) {
 			problem = e.toString();
@@ -75,6 +77,41 @@ public class SanityCheck extends GhidraScript {
 		else {
 			failed++;
 			println("SANITY FAIL " + fact + " (got " + problem.replaceAll("\\s+", " ") + ")");
+		}
+	}
+
+	/** Returns the expected shape when the fact's tokens do not fit it, else null. */
+	private static String expectedShape(String[] t) {
+		int n = t.length - 1;
+		switch (t[0]) {
+			case "loader":
+				return n >= 1 ? null : "loader <name...>";
+			case "block":
+				return n == 2 ? null : "block <name> <start>";
+			case "entry":
+				return n == 1 ? null : "entry <addr>";
+			case "relocations":
+				return n == 2 && t[1].equals(">=") && t[2].matches("\\d+") ? null : "relocations >= <n>";
+			case "bytes":
+				return n == 2 ? null : "bytes <addr> <hex>";
+			case "reference":
+				return n == 3 && t[2].equals("->") ? null : "reference <from> -> <to>";
+			case "function":
+				if (n < 2) {
+					return "function <f> decompiles|contains <text...>|calls <g>";
+				}
+				switch (t[2]) {
+					case "decompiles":
+						return n == 2 ? null : "function <f> decompiles";
+					case "contains":
+						return n >= 3 ? null : "function <f> contains <text...>";
+					case "calls":
+						return n == 3 ? null : "function <f> calls <g>";
+					default:
+						return null;
+				}
+			default:
+				return null;
 		}
 	}
 
