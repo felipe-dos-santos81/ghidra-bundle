@@ -1,7 +1,7 @@
 # Sanity Test Suite — Design
 
 Date: 2026-10-06
-Status: approved in conversation, pending written-spec review
+Status: approved and implemented (see section 10 for amendments)
 
 ## 1. Goal
 
@@ -197,7 +197,7 @@ The implementation is not complete until each of these is demonstrated:
 
 ## 9. Integration
 
-- `Makefile`: `test: ## Run the sanity test suite (headless fixtures + GhidraMCP)`
+- `Makefile`: `test: ## Run the sanity test suite (fixtures, decompiler, extensions, GhidraMCP)`
   → `tests/run-sanity.sh "$(INSTALL_DIR)" "$(JAVA21_HOME)"`. In `PIPELINE`,
   `verify-extensions` is replaced by `test` as the last stage. `verify-extensions`
   stays as a standalone target. `clean` is unchanged (temporary files live in `dist/`).
@@ -215,3 +215,9 @@ The implementation is not complete until each of these is demonstrated:
 5. The GhidraMCP check calls `POST /run_analysis` first; the headless server imports without analyzing.
 6. The runner and every headless run need the project directory to exist; the runner creates `$WORK/proj`.
 7. A missing GhidraMCP jar is reported as a FAIL (the jar lookup uses a nullglob-guarded array), not a script abort.
+8. Hardening from the final review:
+   - A fixture import that exceeds `TEST_IMPORT_TIMEOUT` (default 600 s) is a FAIL; `pkill -f` on the work directory reaps the analysis JVM that `timeout` leaves behind, and `cleanup` does the same before deleting it.
+   - The runner needs GNU `timeout` (`gtimeout` from Homebrew coreutils on macOS) and checks for it.
+   - `UPDATE_SNAPSHOTS=1` leaves `tests/snapshots/` untouched when any check failed.
+   - The `SANITY DONE <p> <f>` counts must be non-zero and match the PASS/FAIL lines parsed, so an empty expectations file or an unparsed line fails the fixture.
+   - The GhidraMCP test server starts without `GHIDRA_MCP_AUTH_TOKEN`, `GHIDRA_MCP_PROJECT_FOLDER` and `GHIDRA_MCP_FILE_ROOT` from the caller's environment.
