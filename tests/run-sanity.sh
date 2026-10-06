@@ -4,6 +4,7 @@
 #
 # Usage: tests/run-sanity.sh <ghidra install dir> <JDK 21 home>
 # Env:   UPDATE_SNAPSHOTS=1  rewrite tests/snapshots/ from this run
+#        TEST_MCP_PORT=18089  port for the GhidraMCP test server (default 18089)
 set -euo pipefail
 
 INSTALL_DIR=${1:?usage: run-sanity.sh <ghidra install dir> <JDK 21 home>}
@@ -25,9 +26,18 @@ for tool in clang python3 curl; do
   command -v "$tool" >/dev/null || die "$tool not found on PATH (run 'make deps')."
 done
 
+MCP_PORT="${TEST_MCP_PORT:-18089}"
 WORK=$(mktemp -d "$INSTALL_DIR/portable/temp/sanity-XXXXXX")
-cleanup() { rm -rf "$WORK"; }
+MCP_PID=""
+cleanup() {
+  if [[ -n "$MCP_PID" ]]; then
+    kill "$MCP_PID" 2>/dev/null || true
+    wait "$MCP_PID" 2>/dev/null || true
+  fi
+  rm -rf "$WORK"
+}
 trap cleanup EXIT
+trap 'exit 130' INT TERM
 
 # ── 1. Extension classes ──────────────────────────────────────────────────────
 echo "Checking extension class discovery..."
@@ -78,6 +88,78 @@ run_fixture() {  # run_fixture <name> <file> [loader]
 run_fixture sample "$WORK/fixtures/sample.o"
 run_fixture dos "$WORK/fixtures/dos.exe" DosLoader
 run_fixture le "$WORK/fixtures/le.exe" LeLoader
+
+# ── 3b. GhidraMCP end to end ──────────────────────────────────────────────────
+check_mcp() {
+  local url="http://127.0.0.1:$MCP_PORT" cp jar i out compute
+  if (exec 3<>"/dev/tcp/127.0.0.1/$MCP_PORT") 2>/dev/null; then
+    fail "GhidraMCP: port $MCP_PORT is already in use (set TEST_MCP_PORT to a free port)"
+    return
+  fi
+  cp=$(ls "$INSTALL_DIR"/Ghidra/Extensions/GhidraMCP/lib/GhidraMCP-*.jar 2>/dev/null | head -n 1)
+  if [[ -z "$cp" ]]; then
+    fail "GhidraMCP: no GhidraMCP jar in $INSTALL_DIR/Ghidra/Extensions/GhidraMCP/lib"
+    return
+  fi
+  for jar in "$INSTALL_DIR"/Ghidra/{Framework,Features,Processors}/*/lib/*.jar; do
+    cp+=":$jar"
+  done
+  mkdir -p "$WORK/mcp"/{home,settings,cache,temp}
+  echo "Starting GhidraMCP headless server on 127.0.0.1:$MCP_PORT..."
+  "$JAVA_HOME/bin/java" -Djava.awt.headless=true \
+    -Duser.home="$WORK/mcp/home" -Djava.io.tmpdir="$WORK/mcp/temp" \
+    -Dapplication.settingsdir="$WORK/mcp/settings" \
+    -Dapplication.cachedir="$WORK/mcp/cache" \
+    -Dapplication.tempdir="$WORK/mcp/temp" \
+    -Dghidra.home="$INSTALL_DIR" -classpath "$cp" \
+    com.xebyte.headless.GhidraMCPHeadlessServer \
+    --bind 127.0.0.1 --port "$MCP_PORT" --file "$WORK/fixtures/sample.o" \
+    > "$WORK/mcp.log" 2>&1 &
+  MCP_PID=$!
+  for ((i = 0; i < 120; i++)); do
+    curl -sf -m 2 "$url/check_connection" > /dev/null 2>&1 && break
+    kill -0 "$MCP_PID" 2>/dev/null || break
+    sleep 1
+  done
+  if ! out=$(curl -sf -m 5 "$url/check_connection"); then
+    fail "GhidraMCP: server did not answer on port $MCP_PORT within 120 s"
+    tail -20 "$WORK/mcp.log" | indent
+    return
+  fi
+  pass "GhidraMCP: /check_connection ($out)"
+
+  if out=$(curl -sf -m 300 -X POST "$url/run_analysis") && [[ "$out" == *'"success":true'* ]]; then
+    pass "GhidraMCP: /run_analysis"
+  else
+    fail "GhidraMCP: /run_analysis (got ${out:0:200})"
+  fi
+
+  out=$(curl -sf -m 30 "$url/list_functions" || true)
+  compute=$(python3 -I -c '
+import json, sys
+funcs = json.load(sys.stdin).get("functions", [])
+names = {f["name"]: f["address"] for f in funcs}
+print(names["compute"] if {"compute", "helper"} <= names.keys() else "")
+' <<< "$out" 2>/dev/null || true)
+  if [[ -z "$compute" ]]; then
+    fail "GhidraMCP: /list_functions lists helper and compute (got ${out:0:200})"
+    return
+  fi
+  pass "GhidraMCP: /list_functions lists helper and compute"
+
+  out=$(curl -sf -m 90 "$url/decompile_function?address=$compute" || true)
+  if [[ "$out" == *0x1234abcd* && "$out" == *helper* ]]; then
+    pass "GhidraMCP: /decompile_function compute"
+  else
+    fail "GhidraMCP: /decompile_function compute (got ${out:0:200})"
+  fi
+
+  kill "$MCP_PID" 2>/dev/null || true
+  wait "$MCP_PID" 2>/dev/null || true
+  MCP_PID=""
+}
+
+check_mcp
 
 # ── 4. Snapshot report (never fails the run) ──────────────────────────────────
 normalize() {  # drop decompiler warning comments and trailing whitespace
