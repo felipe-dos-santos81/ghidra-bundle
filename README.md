@@ -6,7 +6,7 @@ A reproducible, self-contained **Ghidra 12.1.4**, built from source with three e
 | :--- | :--- |
 | [Ghidra](https://github.com/NationalSecurityAgency/ghidra) 12.1.4 | Built from the `Ghidra_12.1.4_build` tag |
 | [GhidraMCP](https://github.com/bethington/ghidra-mcp) | Plugin serving Ghidra's analysis over HTTP on port 8089, plus the `bridge-mcp-ghidra` MCP server |
-| [lx-loader](https://github.com/yetmorecode/ghidra-lx-loader) | Loader for Linear Executables (LE/LX: DOS/4GW, OS/2, VxD) |
+| [lx-loader](https://github.com/yetmorecode/ghidra-lx-loader) | Loader for Linear Executables (LE/LX: DOS/4GW, OS/2, VxD); built from [a fork](https://github.com/felipe-dos-santos81/ghidra-lx-loader/tree/fix-object-permissions) with an object-permissions fix |
 | [GhidraDosToolbox](https://github.com/plaes/GhidraDosToolbox) | MS-DOS loader and analyzers (segmentation, Borland Pascal overlays, interrupt calls) |
 
 ## Quickstart
@@ -83,4 +83,4 @@ ghidra-bundle/
 
 - **Changing the Ghidra version:** check out the new tag in the `ghidra` submodule and update `GHIDRA_VERSION` in the `Makefile`. Stage 02 refuses to build if the two disagree.
 - **Extension directory names matter:** Ghidra only loads an extension's classes when its jar name starts with the extension's directory name, so the extensions keep the names from their zips. `make verify-extensions` catches a mismatch.
-- **Rebuilding:** stages skip when their output exists. Run `make clean` (or delete the specific extension under `dist/.../Ghidra/Extensions/`) to rebuild.
+- **Rebuilding:** stages skip when their output exists; extensions rebuild when their submodule commit changes. Run `make clean` (or delete the specific extension under `dist/.../Ghidra/Extensions/`) to rebuild.

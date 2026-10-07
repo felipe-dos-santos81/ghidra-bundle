@@ -30,6 +30,7 @@ Operational context, invariants and conventions for AI coding agents working in 
 - To test whether the patch is already applied, grep for `^# --- Portable Mode Overrides ---`, not `application.settingsdir`, which also matches upstream's commented lines.
 
 ### 2.2 Extension Placement
+- Each extension stage records its source commit in `<ext>/.bundle-source` and rebuilds when the submodule commit changes.
 - Extensions are unzipped into `dist/ghidra_12.1.4_PUBLIC/Ghidra/Extensions/`, keeping the directory name from their zip:
   - `GhidraMCP/` (`lib/GhidraMCP-<ver>.jar`)
   - `lx-loader/` (`lib/lx-loader.jar`)
@@ -41,9 +42,9 @@ Operational context, invariants and conventions for AI coding agents working in 
 - Upstream repositories are shallow submodules:
   - `ghidra` (NSA, tag `Ghidra_12.1.4_build`)
   - `ghidra-mcp` (bethington/ghidra-mcp, `main`)
-  - `lx-loader` (felipe-dos-santos81/ghidra-lx-loader, `fix-object-permissions`): upstream yetmorecode/ghidra-lx-loader `master` plus the object-permissions fix. Point it back at upstream once that fix is merged there.
+  - `lx-loader` (felipe-dos-santos81/ghidra-lx-loader, `fix-object-permissions`): upstream yetmorecode/ghidra-lx-loader `master` plus the object-permissions fix. Pinned to tag `bundle-pin-bce85fd` on the fork, so never force-push or delete that tag. Point it back at upstream once that fix is merged there.
   - `dos-toolbox` (plaes/GhidraDosToolbox, `wip-ghidra-12`)
-- Sync with `git submodule update --init --recursive --depth 1` (`make checkout`). `distclean` uses `git submodule deinit -f --all`.
+- Sync with `git submodule sync --recursive` then `git submodule update --init --recursive --depth 1` (`make checkout`); the sync carries `.gitmodules` URL changes into existing clones. `distclean` uses `git submodule deinit -f --all`.
 - `GHIDRA_VERSION` in the `Makefile` is the single version pin. Stage 02 fails if it differs from `application.version` in the `ghidra` submodule. `build-ghidra.sh` reads the version from the submodule.
 - All three extensions are built with `ghidra/gradlew ... buildExtension` against the installed Ghidra, so their `extension.properties` carry the installed version.
 

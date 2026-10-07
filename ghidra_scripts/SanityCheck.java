@@ -77,6 +77,9 @@ public class SanityCheck extends GhidraScript {
 		catch (Unparseable e) {
 			problem = "unparseable fact (expected: " + e.getMessage() + ")";
 		}
+		catch (Problem e) {
+			problem = e.getMessage();
+		}
 		catch (Exception e) {
 			problem = e.toString();
 		}
@@ -97,6 +100,21 @@ public class SanityCheck extends GhidraScript {
 		}
 	}
 
+	/** Thrown by helpers to report what was observed instead; the message becomes the FAIL reason. */
+	private static final class Problem extends RuntimeException {
+		Problem(String observed) {
+			super(observed);
+		}
+	}
+
+	private MemoryBlock block(String name) {
+		MemoryBlock block = getMemoryBlock(name);
+		if (block == null) {
+			throw new Problem("no block named " + name);
+		}
+		return block;
+	}
+
 	private static void need(boolean ok, String shape) {
 		if (!ok) {
 			throw new Unparseable(shape);
@@ -113,18 +131,12 @@ public class SanityCheck extends GhidraScript {
 			}
 			case "block": {
 				need(t.length == 3, "block <name> <start>");
-				MemoryBlock block = getMemoryBlock(t[1]);
-				if (block == null) {
-					return "no block named " + t[1];
-				}
+				MemoryBlock block = block(t[1]);
 				return block.getStart().equals(addr(t[2])) ? null : "starts at " + block.getStart();
 			}
 			case "permissions": {
 				need(t.length == 3 && t[2].matches("[r-][w-][x-]"), "permissions <block> <rwx>");
-				MemoryBlock block = getMemoryBlock(t[1]);
-				if (block == null) {
-					return "no block named " + t[1];
-				}
+				MemoryBlock block = block(t[1]);
 				String got = (block.isRead() ? "r" : "-") + (block.isWrite() ? "w" : "-") +
 					(block.isExecute() ? "x" : "-");
 				return got.equals(t[2]) ? null : got;

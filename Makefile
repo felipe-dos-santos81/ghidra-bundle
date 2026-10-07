@@ -102,6 +102,7 @@ env: 00-env
 # ── Stages 1–3: Ghidra ────────────────────────────────────────────────────────
 
 01-checkout: ## Fetch the pinned submodules (shallow)
+	git submodule sync --recursive --quiet
 	git submodule update --init --recursive --depth 1
 
 02-build-ghidra: 01-checkout ## Build the Ghidra distribution zip from source
@@ -141,21 +142,24 @@ install-ghidra: 03-install-ghidra
 # ── Stages 4–6: Extensions ────────────────────────────────────────────────────
 
 # $(call install_extension,directory,source dir,zip glob[,legacy directory to remove])
-# Builds an extension with ghidra/gradlew and unzips it into $(EXT_DIR).
+# Builds an extension with ghidra/gradlew and unzips it into $(EXT_DIR). The source
+# commit is recorded in <ext>/.bundle-source; the stage rebuilds when it changes.
 # Never rename the unzipped directory: Ghidra only loads classes from
 # <ext>/lib/<jar> when the jar name starts with the directory name, so a
 # renamed extension silently loses its loaders, analyzers and plugins.
 define install_extension
-@if [ -d "$(EXT_DIR)/$(1)" ]; then \
-	echo "$(1) already installed, skipping."; \
+@SRC=$$(git -C $(2) rev-parse HEAD 2>/dev/null); \
+if [ -d "$(EXT_DIR)/$(1)" ] && { [ -z "$$SRC" ] || [ "$$(cat "$(EXT_DIR)/$(1)/.bundle-source" 2>/dev/null)" = "$$SRC" ]; }; then \
+	echo "$(1) already installed$${SRC:+ from $${SRC:0:7}}, skipping."; \
 else \
-	echo "Building $(1)..."; \
+	echo "Building $(1)$${SRC:+ from $${SRC:0:7}}..."; \
 	(cd $(2) && ../ghidra/gradlew -p . -PGHIDRA_INSTALL_DIR="$(INSTALL_DIR)" buildExtension) || exit 1; \
 	ZIP=$$(ls -1t $(3) 2>/dev/null | head -n 1); \
 	[ -n "$$ZIP" ] || { $(ERR) "no zip matching $(3)"; exit 1; }; \
-	$(if $(4),rm -rf "$(EXT_DIR)/$(4)";) \
+	rm -rf "$(EXT_DIR)/$(1)" $(if $(4),"$(EXT_DIR)/$(4)"); \
 	unzip -q -o "$$ZIP" -d "$(EXT_DIR)" || exit 1; \
 	[ -d "$(EXT_DIR)/$(1)" ] || { $(ERR) "$$ZIP did not create $(EXT_DIR)/$(1)"; exit 1; }; \
+	[ -z "$$SRC" ] || echo "$$SRC" > "$(EXT_DIR)/$(1)/.bundle-source"; \
 	$(OK) "$(1) installed."; \
 fi
 endef
