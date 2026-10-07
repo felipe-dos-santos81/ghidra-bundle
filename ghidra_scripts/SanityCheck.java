@@ -2,8 +2,9 @@
 // expectations file (see docs/superpowers/specs/2026-10-06-sanity-test-design.md).
 // Usage (analyzeHeadless): -postScript SanityCheck.java <expectations file> <output dir>
 // Prints "SANITY PASS <fact>" or "SANITY FAIL <fact> (got ...)" per fact and
-// "SANITY DONE <passed> <failed>" last; writes the decompiled C of every
-// function named in a "function" fact to <output dir>/<function>.c.
+// "SANITY DONE <passed> <failed>" last, and writes the same lines to
+// <output dir>/results.txt when it finishes. Writes the decompiled C of every
+// function named in a "decompiles" or "contains" fact to <output dir>/<function>.c.
 //@category Bundle
 
 import java.io.File;
@@ -29,6 +30,7 @@ public class SanityCheck extends GhidraScript {
 	private static final String DECOMPILE_FAILED = "DECOMPILE FAILED: ";
 
 	private final Map<Function, String> decompiled = new HashMap<>();
+	private final List<String> results = new ArrayList<>();
 	private DecompInterface decompiler;
 	private boolean opened;
 	private File outDir;
@@ -58,61 +60,46 @@ public class SanityCheck extends GhidraScript {
 		finally {
 			decompiler.dispose();
 		}
-		println("SANITY DONE " + passed + " " + failed);
+		emit("SANITY DONE " + passed + " " + failed);
+		Files.write(new File(outDir, "results.txt").toPath(), results, StandardCharsets.UTF_8);
+	}
+
+	private void emit(String line) {
+		println(line);
+		results.add(line);
 	}
 
 	private void report(String fact) {
 		String problem;
 		try {
-			String[] t = fact.split("\\s+");
-			String shape = expectedShape(t);
-			problem = shape != null ? "unparseable fact (expected: " + shape + ")" : check(t);
+			problem = check(fact.split("\\s+"));
+		}
+		catch (Unparseable e) {
+			problem = "unparseable fact (expected: " + e.getMessage() + ")";
 		}
 		catch (Exception e) {
 			problem = e.toString();
 		}
 		if (problem == null) {
 			passed++;
-			println("SANITY PASS " + fact);
+			emit("SANITY PASS " + fact);
 		}
 		else {
 			failed++;
-			println("SANITY FAIL " + fact + " (got " + problem.replaceAll("\\s+", " ") + ")");
+			emit("SANITY FAIL " + fact + " (got " + problem.replaceAll("\\s+", " ") + ")");
 		}
 	}
 
-	/** Returns the expected shape when the fact's tokens do not fit it, else null. */
-	private static String expectedShape(String[] t) {
-		int n = t.length - 1;
-		switch (t[0]) {
-			case "loader":
-				return n >= 1 ? null : "loader <name...>";
-			case "block":
-				return n == 2 ? null : "block <name> <start>";
-			case "entry":
-				return n == 1 ? null : "entry <addr>";
-			case "relocations":
-				return n == 2 && t[1].equals(">=") && t[2].matches("\\d+") ? null : "relocations >= <n>";
-			case "bytes":
-				return n == 2 ? null : "bytes <addr> <hex>";
-			case "reference":
-				return n == 3 && t[2].equals("->") ? null : "reference <from> -> <to>";
-			case "function":
-				if (n < 2) {
-					return "function <f> decompiles|contains <text...>|calls <g>";
-				}
-				switch (t[2]) {
-					case "decompiles":
-						return n == 2 ? null : "function <f> decompiles";
-					case "contains":
-						return n >= 3 ? null : "function <f> contains <text...>";
-					case "calls":
-						return n == 3 ? null : "function <f> calls <g>";
-					default:
-						return null;
-				}
-			default:
-				return null;
+	/** Thrown by {@link #need} when a fact's tokens do not fit its shape. */
+	private static final class Unparseable extends RuntimeException {
+		Unparseable(String shape) {
+			super(shape);
+		}
+	}
+
+	private static void need(boolean ok, String shape) {
+		if (!ok) {
+			throw new Unparseable(shape);
 		}
 	}
 
@@ -120,17 +107,20 @@ public class SanityCheck extends GhidraScript {
 	private String check(String[] t) throws Exception {
 		switch (t[0]) {
 			case "loader": {
+				need(t.length >= 2, "loader <name...>");
 				String got = currentProgram.getExecutableFormat();
 				return join(t, 1).equals(got) ? null : got;
 			}
 			case "block": {
-				MemoryBlock block = currentProgram.getMemory().getBlock(t[1]);
+				need(t.length == 3, "block <name> <start>");
+				MemoryBlock block = getMemoryBlock(t[1]);
 				if (block == null) {
 					return "no block named " + t[1];
 				}
 				return block.getStart().equals(addr(t[2])) ? null : "starts at " + block.getStart();
 			}
 			case "entry": {
+				need(t.length == 2, "entry <addr>");
 				if (currentProgram.getSymbolTable().isExternalEntryPoint(addr(t[1]))) {
 					return null;
 				}
@@ -140,20 +130,18 @@ public class SanityCheck extends GhidraScript {
 				return "entry points " + entries;
 			}
 			case "relocations": {
-				int count = 0;
-				var it = currentProgram.getRelocationTable().getRelocations();
-				while (it.hasNext()) {
-					it.next();
-					count++;
-				}
+				need(t.length == 3 && t[1].equals(">=") && t[2].matches("\\d+"), "relocations >= <n>");
+				int count = currentProgram.getRelocationTable().getSize();
 				return count >= Integer.parseInt(t[2]) ? null : count + " relocations";
 			}
 			case "bytes": {
+				need(t.length == 3, "bytes <addr> <hex>");
 				byte[] want = HexFormat.of().parseHex(t[2]);
 				byte[] got = getBytes(addr(t[1]), want.length);
 				return Arrays.equals(want, got) ? null : HexFormat.of().formatHex(got);
 			}
 			case "reference": {
+				need(t.length == 4 && t[2].equals("->"), "reference <from> -> <to>");
 				Address to = addr(t[3]);
 				Reference[] refs = getReferencesFrom(addr(t[1]));
 				for (Reference ref : refs) {
@@ -171,15 +159,20 @@ public class SanityCheck extends GhidraScript {
 	}
 
 	private String checkFunction(String[] t) throws Exception {
+		need(t.length >= 3, "function <f> decompiles|contains <text...>|calls <g>");
 		Function f = function(t[1]);
 		if (f == null) {
 			return "no function " + t[1];
 		}
-		String c = decompile(f);
 		switch (t[2]) {
-			case "decompiles":
+			case "decompiles": {
+				need(t.length == 3, "function <f> decompiles");
+				String c = decompile(f);
 				return c.startsWith(DECOMPILE_FAILED) ? c : null;
+			}
 			case "contains": {
+				need(t.length >= 4, "function <f> contains <text...>");
+				String c = decompile(f);
 				if (c.startsWith(DECOMPILE_FAILED)) {
 					return c;
 				}
@@ -187,6 +180,7 @@ public class SanityCheck extends GhidraScript {
 				return c.contains(want) ? null : "decompiled C without '" + want + "', see " + fileFor(f);
 			}
 			case "calls": {
+				need(t.length == 4, "function <f> calls <g>");
 				Function callee = function(t[3]);
 				if (callee == null) {
 					return "no function " + t[3];

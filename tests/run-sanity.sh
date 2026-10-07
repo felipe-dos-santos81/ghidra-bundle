@@ -22,6 +22,7 @@ pass() { PASSED=$((PASSED + 1)); RESULTS+=("PASS  $1"); }
 fail() { FAILED=$((FAILED + 1)); RESULTS+=("FAIL  $1"); }
 die() { printf '\033[31mERROR: %s\033[0m\n' "$1" >&2; exit 1; }
 indent() { sed 's/^/    /'; }
+fail_with_log() { fail "$1"; tail -20 "$2" | indent; }  # fail_with_log <message> <log file>
 
 [[ -x "$HEADLESS" ]] || die "$HEADLESS not found; run 'make install' first."
 for tool in clang python3 curl; do
@@ -45,11 +46,15 @@ WORK=$(mktemp -d "$INSTALL_DIR/portable/temp/sanity-XXXXXX")
 # pkill -f takes an extended regex; escape the path so characters like [ ( + in it match literally.
 WORK_RE=$(printf '%s' "$WORK" | sed 's/[][\\.*^$+?(){}|]/\\&/g')
 MCP_PID=""
-cleanup() {
+stop_mcp() {
   if [[ -n "$MCP_PID" ]]; then
     kill "$MCP_PID" 2>/dev/null || true
     wait "$MCP_PID" 2>/dev/null || true
+    MCP_PID=""
   fi
+}
+cleanup() {
+  stop_mcp
   pkill -f -- "$WORK_RE" 2>/dev/null || true  # stray analysis JVMs, e.g. from a timed-out import
   rm -rf "$WORK"
 }
@@ -80,44 +85,39 @@ python3 -I "$TESTS/make_fixtures.py" "$WORK/fixtures" > /dev/null
 # ── 3. Headless import + SanityCheck.java per fixture ─────────────────────────
 run_fixture() {  # run_fixture <name> <file> [loader]
   local name=$1 file=$2 loader=${3:-}
-  local log="$WORK/$name.log" out="$WORK/out/$name" line
-  local limit=${TEST_IMPORT_TIMEOUT:-600} status=0 lines=0 done_p done_f
+  local log="$WORK/$name.log" out="$WORK/out/$name" label=${loader:-auto} line
+  local limit=${TEST_IMPORT_TIMEOUT:-600} status=0
   local args=("$WORK/proj" "sanity-$name" -import "$file")
   [[ -n "$loader" ]] && args+=(-loader "$loader")
   args+=(-deleteProject -scriptPath "$REPO_DIR/ghidra_scripts"
          -postScript SanityCheck.java "$TESTS/expect/$name.txt" "$out")
   mkdir -p "$out"
-  echo "Importing $name ($(basename "$file"), loader ${loader:-auto})..."
+  echo "Importing $name ($(basename "$file"), loader $label)..."
   # --foreground keeps analyzeHeadless in the terminal's process group so Ctrl-C reaches it.
   "$TIMEOUT" --foreground "$limit" "$HEADLESS" "${args[@]}" > "$log" 2>&1 || status=$?
   ((status == 0)) || echo "analyzeHeadless exit status $status" >> "$log"
   if ((status == 124)); then
     # timeout only kills its direct child; analyzeHeadless's JVM keeps running.
     pkill -f -- "$WORK_RE/proj" || true
-    fail "$name: import timed out after $limit s (loader ${loader:-auto})"
-    tail -20 "$log" | indent
+    fail_with_log "$name: import timed out after $limit s (loader $label)" "$log"
     return
   fi
   if ! grep -q 'Import succeeded' "$log"; then
-    fail "$name: import failed (loader ${loader:-auto})"
-    tail -20 "$log" | indent
+    fail_with_log "$name: import failed (loader $label)" "$log"
+    return
+  fi
+  # SanityCheck.java writes results.txt only when it finishes, ending with "SANITY DONE <p> <f>".
+  if [[ ! -f "$out/results.txt" ]]; then
+    fail_with_log "$name: SanityCheck.java did not finish" "$log"
     return
   fi
   while IFS= read -r line; do
     case "$line" in
-      PASS\ *) pass "$name: ${line#PASS }"; lines=$((lines + 1)) ;;
-      FAIL\ *) fail "$name: ${line#FAIL }"; lines=$((lines + 1)) ;;
+      "SANITY PASS "*) pass "$name: ${line#SANITY PASS }" ;;
+      "SANITY FAIL "*) fail "$name: ${line#SANITY FAIL }" ;;
+      "SANITY DONE 0 0") fail "$name: no facts checked" ;;
     esac
-  done < <(sed -nE 's/^.*SANITY (PASS|FAIL) (.*) \(GhidraScript\) *$/\1 \2/p' "$log")
-  read -r done_p done_f < <(sed -nE 's/^.*SANITY DONE ([0-9]+) ([0-9]+).*$/\1 \2/p' "$log" | tail -1) || true
-  if [[ -z "${done_p:-}" ]]; then
-    fail "$name: SanityCheck.java did not finish"
-    tail -20 "$log" | indent
-  elif ((done_p + done_f == 0)); then
-    fail "$name: no facts checked"
-  elif ((done_p + done_f != lines)); then
-    fail "$name: SanityCheck.java reported $done_p passed, $done_f failed but $lines lines were parsed"
-  fi
+  done < "$out/results.txt"
 }
 
 [[ -n "$SAMPLE" ]] && run_fixture sample "$SAMPLE"
@@ -155,14 +155,15 @@ check_mcp() {
     --bind 127.0.0.1 --port "$MCP_PORT" --file "$SAMPLE" \
     > "$WORK/mcp.log" 2>&1 &
   MCP_PID=$!
+  out=""
   for ((i = 0; i < 120; i++)); do
-    curl -sf -m 2 "$url/check_connection" > /dev/null 2>&1 && break
+    out=$(curl -sf -m 2 "$url/check_connection" 2>/dev/null) && break
+    out=""
     kill -0 "$MCP_PID" 2>/dev/null || break
     sleep 1
   done
-  if ! out=$(curl -sf -m 5 "$url/check_connection"); then
-    fail "GhidraMCP: server did not answer on port $MCP_PORT within 120 s"
-    tail -20 "$WORK/mcp.log" | indent
+  if [[ -z "$out" ]]; then
+    fail_with_log "GhidraMCP: server did not answer on port $MCP_PORT within 120 s" "$WORK/mcp.log"
     return
   fi
   pass "GhidraMCP: /check_connection ($out)"
@@ -193,9 +194,7 @@ print(names["compute"] if {"compute", "helper"} <= names.keys() else "")
     fail "GhidraMCP: /decompile_function compute (got ${out:0:200})"
   fi
 
-  kill "$MCP_PID" 2>/dev/null || true
-  wait "$MCP_PID" 2>/dev/null || true
-  MCP_PID=""
+  stop_mcp
 }
 
 if [[ -n "$SAMPLE" ]]; then
@@ -209,7 +208,8 @@ normalize() {  # drop decompiler warning comments and trailing whitespace
   sed -E -e '/^[[:space:]]*\/\* WARNING.*\*\/[[:space:]]*$/d' -e 's/[[:space:]]+$//' "$1"
 }
 
-report_snapshots() {
+report_snapshots() (  # subshell, so nullglob stays local
+  shopt -s nullglob
   local f rel snap changed=0
   if [[ "${UPDATE_SNAPSHOTS:-}" == 1 ]]; then
     if ((FAILED > 0)); then
@@ -218,7 +218,6 @@ report_snapshots() {
     fi
     rm -rf "$TESTS/snapshots"
     for f in "$WORK"/out/*/*.c; do
-      [[ -e "$f" ]] || continue
       rel=${f#"$WORK/out/"}
       mkdir -p "$(dirname "$TESTS/snapshots/$rel")"
       normalize "$f" > "$TESTS/snapshots/$rel"
@@ -229,7 +228,6 @@ report_snapshots() {
   echo
   echo "Snapshot changes (informational):"
   for f in "$WORK"/out/*/*.c; do
-    [[ -e "$f" ]] || continue
     rel=${f#"$WORK/out/"}
     snap="$TESTS/snapshots/$rel"
     if [[ ! -f "$snap" ]]; then
@@ -240,7 +238,6 @@ report_snapshots() {
     fi
   done
   for snap in "$TESTS"/snapshots/*/*.c; do
-    [[ -e "$snap" ]] || continue
     rel=${snap#"$TESTS/snapshots/"}
     if [[ ! -e "$WORK/out/$rel" ]]; then
       echo "  gone: $rel (no longer produced)"
@@ -252,7 +249,7 @@ report_snapshots() {
   else
     echo "  (after a deliberate upgrade, record them with: UPDATE_SNAPSHOTS=1 make test)"
   fi
-}
+)
 
 report_snapshots
 
