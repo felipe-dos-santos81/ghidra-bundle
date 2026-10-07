@@ -69,7 +69,7 @@ ghidra-bundle/
 ├── tests/                # make test: fixtures, expectations, snapshots, run-sanity.sh
 ├── ghidra/               # Submodule: NSA Ghidra, tag Ghidra_12.1.4_build
 ├── ghidra-mcp/           # Submodule: GhidraMCP
-├── lx-loader/            # Submodule: ghidra-lx-loader
+├── lx-loader/            # Submodule: ghidra-lx-loader (fork with the object-permissions fix)
 ├── dos-toolbox/          # Submodule: GhidraDosToolbox, branch wip-ghidra-12
 ├── .venv/                # Python venv with bridge-mcp-ghidra (git-ignored)
 └── dist/                 # Built Ghidra (git-ignored)

@@ -123,6 +123,7 @@ address.
 | :--- | :--- |
 | `loader <name>` | `program.getExecutableFormat()` equals `<name>` |
 | `block <name> <start>` | a memory block `<name>` starts at `<start>` |
+| `permissions <block> <rwx>` | the block's read/write/execute flags equal `<rwx>` (e.g. `r-x`) |
 | `entry <addr>` | `<addr>` is an external entry point |
 | `relocations >= <n>` | the relocation table has at least `n` entries |
 | `bytes <addr> <hex>` | memory at `<addr>` equals the hex bytes |
@@ -227,3 +228,4 @@ The implementation is not complete until each of these is demonstrated:
    - `timeout`/`gtimeout` is accepted only if `--foreground` works (rejects BusyBox and other non-GNU builds).
    - `pkill` patterns use the work path with regex metacharacters escaped. (Ghidra itself rejects project paths containing `+`.)
    - `00-env` checks curl and GNU `timeout`.
+10. `permissions <block> <rwx>` fact (2026-10-07): `le.txt` checks `.object1 r-x` and `.object2 rw-`. It found that lx-loader ignored LE object flags; the fix is built from the felipe-dos-santos81/ghidra-lx-loader fork until merged upstream.

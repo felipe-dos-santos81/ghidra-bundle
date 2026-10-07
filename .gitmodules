@@ -8,8 +8,9 @@
 	shallow = true
 [submodule "lx-loader"]
 	path = lx-loader
-	url = https://github.com/yetmorecode/ghidra-lx-loader.git
+	url = https://github.com/felipe-dos-santos81/ghidra-lx-loader.git
 	shallow = true
+	branch = fix-object-permissions
 [submodule "dos-toolbox"]
 	path = dos-toolbox
 	url = https://github.com/plaes/GhidraDosToolbox.git

@@ -2,6 +2,8 @@
 loader Linear Executable (LE-Style DOS)
 block .object1 00010000
 block .object2 00020000
+permissions .object1 r-x           # LE object flags 0x2005: readable, executable
+permissions .object2 rw-           # LE object flags 0x2003: readable, writable
 entry 00010000
 relocations >= 1
 bytes 00010001 04000200             # fixup applied: [obj2+4] -> 0x00020004

@@ -41,7 +41,7 @@ Operational context, invariants and conventions for AI coding agents working in 
 - Upstream repositories are shallow submodules:
   - `ghidra` (NSA, tag `Ghidra_12.1.4_build`)
   - `ghidra-mcp` (bethington/ghidra-mcp, `main`)
-  - `lx-loader` (yetmorecode/ghidra-lx-loader, `master`)
+  - `lx-loader` (felipe-dos-santos81/ghidra-lx-loader, `fix-object-permissions`): upstream yetmorecode/ghidra-lx-loader `master` plus the object-permissions fix. Point it back at upstream once that fix is merged there.
   - `dos-toolbox` (plaes/GhidraDosToolbox, `wip-ghidra-12`)
 - Sync with `git submodule update --init --recursive --depth 1` (`make checkout`). `distclean` uses `git submodule deinit -f --all`.
 - `GHIDRA_VERSION` in the `Makefile` is the single version pin. Stage 02 fails if it differs from `application.version` in the `ghidra` submodule. `build-ghidra.sh` reads the version from the submodule.

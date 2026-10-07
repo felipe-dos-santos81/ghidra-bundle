@@ -119,6 +119,16 @@ public class SanityCheck extends GhidraScript {
 				}
 				return block.getStart().equals(addr(t[2])) ? null : "starts at " + block.getStart();
 			}
+			case "permissions": {
+				need(t.length == 3 && t[2].matches("[r-][w-][x-]"), "permissions <block> <rwx>");
+				MemoryBlock block = getMemoryBlock(t[1]);
+				if (block == null) {
+					return "no block named " + t[1];
+				}
+				String got = (block.isRead() ? "r" : "-") + (block.isWrite() ? "w" : "-") +
+					(block.isExecute() ? "x" : "-");
+				return got.equals(t[2]) ? null : got;
+			}
 			case "entry": {
 				need(t.length == 2, "entry <addr>");
 				if (currentProgram.getSymbolTable().isExternalEntryPoint(addr(t[1]))) {
