@@ -18,7 +18,7 @@ make install   # installs missing packages, builds and installs everything
 make run       # launches Ghidra
 ```
 
-`make install` installs any missing prerequisites with `sudo apt` (Linux) or `brew` (macOS): JDK 21, Maven, Clang, Python 3.10+, uv and Git. Run `make env` to check them. The Ghidra source build takes several minutes; every stage skips work that is already done.
+`make install` installs any missing prerequisites with `sudo apt` (Linux) or `brew` (macOS): JDK 21, Maven, Clang, Python 3.10+, uv, Git, curl and GNU `timeout` (`gtimeout` on macOS). Run `make env` to check them. The Ghidra source build takes several minutes; every stage skips work that is already done.
 
 ## Using the MCP server
 
@@ -42,9 +42,9 @@ Run `make help` for the same list.
 | `04-install-mcp` (`install-mcp`) | Build and install GhidraMCP |
 | `05-install-lx-loader` (`install-lx-loader`) | Build and install lx-loader |
 | `06-install-dos-toolbox` (`install-dos-toolbox`) | Build and install GhidraDosToolbox |
+| `verify-extensions` | Quick headless check that Ghidra loads every extension's classes |
 | `07-venv` (`venv`) | Create `.venv` with `bridge-mcp-ghidra` |
 | `08-register-mcp` (`register-mcp`) | Register the MCP server with opencode and Claude Code |
-| `verify-extensions` | Quick headless check that Ghidra loads every extension's classes |
 | `test` | Run the sanity test suite (see Testing) |
 | `install` | Run all of the above, in order (ends with `test`) |
 | `run` | Launch Ghidra (fails if port 8089 is in use) |

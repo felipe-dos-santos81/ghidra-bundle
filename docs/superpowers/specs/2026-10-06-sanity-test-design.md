@@ -221,3 +221,9 @@ The implementation is not complete until each of these is demonstrated:
    - `UPDATE_SNAPSHOTS=1` leaves `tests/snapshots/` untouched when any check failed.
    - The `SANITY DONE <p> <f>` counts must be non-zero and match the PASS/FAIL lines parsed, so an empty expectations file or an unparsed line fails the fixture.
    - The GhidraMCP test server starts without `GHIDRA_MCP_AUTH_TOKEN`, `GHIDRA_MCP_PROJECT_FOLDER` and `GHIDRA_MCP_FILE_ROOT` from the caller's environment.
+9. Follow-up review fixes:
+   - `verify-extensions` is a pipeline stage again (after `06`, before `07-venv`), so a broken extension stops `make install` before MCP registration; `test` stays last.
+   - A clang failure is one FAIL; the ELF fixture and GhidraMCP check are skipped, every other check still runs.
+   - `timeout`/`gtimeout` is accepted only if `--foreground` works (rejects BusyBox and other non-GNU builds).
+   - `pkill` patterns use the work path with regex metacharacters escaped. (Ghidra itself rejects project paths containing `+`.)
+   - `00-env` checks curl and GNU `timeout`.

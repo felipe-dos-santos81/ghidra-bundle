@@ -2,7 +2,7 @@
 # and GhidraDosToolbox. `make install` runs the numbered stages in order:
 #   00-deps → 00-env → 01-checkout → 02-build-ghidra → 03-install-ghidra →
 #   04-install-mcp → 05-install-lx-loader → 06-install-dos-toolbox →
-#   07-venv → 08-register-mcp → test
+#   verify-extensions → 07-venv → 08-register-mcp → test
 # Every stage is idempotent and skips work that is already done.
 
 .NOTPARALLEL:
@@ -25,6 +25,8 @@ BRIDGE_BIN := $(VENV_DIR)/bin/bridge-mcp-ghidra
 OPENCODE_CONFIG := $(HOME)/.config/opencode/opencode.json
 
 UNAME_S := $(shell uname -s)
+# GNU timeout, needed by `make test`: coreutils on Linux, Homebrew's gtimeout on macOS.
+TIMEOUT_CMD := $(if $(filter Darwin,$(UNAME_S)),gtimeout,timeout)
 
 # JDK 21: JAVA21_HOME if given, else $JAVA_HOME, /usr/lib/jvm/*21*, or javac on PATH.
 ifndef JAVA21_HOME
@@ -82,7 +84,7 @@ help: ## Show this help
 check_tool = command -v $(1) >/dev/null 2>&1 || { $(ERR) "$(2) not found on PATH (run 'make deps')"; exit 1; }; \
 	printf '\033[32m✔ %-7s\033[0m %s\n' "$(2)" "$$($(3) 2>&1 | head -n 1)"
 
-00-env: ## Check host prerequisites (JDK 21, Maven, Clang, Python 3, uv, Git)
+00-env: ## Check host prerequisites (JDK 21, Maven, Clang, Python 3, uv, Git, curl, GNU timeout)
 	@[ -d "$(JAVA21_HOME)" ] || { $(ERR) "JDK 21 not found (run 'make deps')"; exit 1; }
 	@printf '\033[32m✔ %-7s\033[0m %s\n' "JDK 21" "$(JAVA21_HOME)"
 	@$(call check_tool,mvn,Maven,mvn -version)
@@ -90,6 +92,8 @@ check_tool = command -v $(1) >/dev/null 2>&1 || { $(ERR) "$(2) not found on PATH
 	@$(call check_tool,python3,Python,python3 --version)
 	@$(call check_tool,uv,uv,uv --version)
 	@$(call check_tool,git,Git,git --version)
+	@$(call check_tool,curl,curl,curl --version)
+	@$(call check_tool,$(TIMEOUT_CMD),timeout,$(TIMEOUT_CMD) --version)
 	@$(OK) "Environment check passed."
 
 deps: 00-deps
@@ -236,7 +240,7 @@ register-mcp: 08-register-mcp
 # ── Pipeline & runtime ────────────────────────────────────────────────────────
 
 PIPELINE := 00-deps 00-env 01-checkout 02-build-ghidra 03-install-ghidra 04-install-mcp \
-	05-install-lx-loader 06-install-dos-toolbox 07-venv 08-register-mcp test
+	05-install-lx-loader 06-install-dos-toolbox verify-extensions 07-venv 08-register-mcp test
 
 install: $(PIPELINE) ## Run the full pipeline (all stages above, in order)
 	@$(OK) "Ghidra Bundle installed. Run 'make run' to launch Ghidra."

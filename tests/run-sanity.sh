@@ -28,18 +28,29 @@ for tool in clang python3 curl; do
   command -v "$tool" >/dev/null || die "$tool not found on PATH (run 'make deps')."
 done
 
-TIMEOUT=$(command -v timeout || command -v gtimeout) \
-  || die "GNU timeout not found (Linux: coreutils; macOS: brew install coreutils)."
+# Imports rely on `timeout --foreground`, which BusyBox and other non-GNU builds lack.
+TIMEOUT=""
+for candidate in timeout gtimeout; do
+  path=$(command -v "$candidate") || continue
+  if "$path" --foreground 5 true 2>/dev/null; then
+    TIMEOUT=$path
+    break
+  fi
+done
+[[ -n "$TIMEOUT" ]] \
+  || die "GNU timeout with --foreground not found (Linux: coreutils; macOS: brew install coreutils)."
 
 MCP_PORT="${TEST_MCP_PORT:-18089}"
 WORK=$(mktemp -d "$INSTALL_DIR/portable/temp/sanity-XXXXXX")
+# pkill -f takes an extended regex; escape the path so characters like [ ( + in it match literally.
+WORK_RE=$(printf '%s' "$WORK" | sed 's/[][\\.*^$+?(){}|]/\\&/g')
 MCP_PID=""
 cleanup() {
   if [[ -n "$MCP_PID" ]]; then
     kill "$MCP_PID" 2>/dev/null || true
     wait "$MCP_PID" 2>/dev/null || true
   fi
-  pkill -f -- "$WORK" 2>/dev/null || true  # stray analysis JVMs or a server that ignored SIGTERM
+  pkill -f -- "$WORK_RE" 2>/dev/null || true  # stray analysis JVMs, e.g. from a timed-out import
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -57,9 +68,13 @@ fi
 # ── 2. Fixtures ───────────────────────────────────────────────────────────────
 echo "Building fixtures..."
 mkdir -p "$WORK/fixtures" "$WORK/proj"
-clang --target=i386-unknown-linux-gnu -O1 -fno-pic -c "$TESTS/fixtures/sample.c" \
-  -o "$WORK/fixtures/sample.o" 2> "$WORK/clang.log" \
-  || die "clang could not build an i386 object: $(head -1 "$WORK/clang.log")"
+SAMPLE="$WORK/fixtures/sample.o"
+if ! clang --target=i386-unknown-linux-gnu -O1 -fno-pic -c "$TESTS/fixtures/sample.c" \
+    -o "$SAMPLE" 2> "$WORK/clang.log"; then
+  # Only the ELF fixture and the GhidraMCP check need sample.o; the rest still runs.
+  fail "sample: clang could not build an i386 object: $(grep -m1 'error' "$WORK/clang.log" || head -1 "$WORK/clang.log")"
+  SAMPLE=""
+fi
 python3 -I "$TESTS/make_fixtures.py" "$WORK/fixtures" > /dev/null
 
 # ── 3. Headless import + SanityCheck.java per fixture ─────────────────────────
@@ -78,7 +93,7 @@ run_fixture() {  # run_fixture <name> <file> [loader]
   ((status == 0)) || echo "analyzeHeadless exit status $status" >> "$log"
   if ((status == 124)); then
     # timeout only kills its direct child; analyzeHeadless's JVM keeps running.
-    pkill -f -- "$WORK/proj" || true
+    pkill -f -- "$WORK_RE/proj" || true
     fail "$name: import timed out after $limit s (loader ${loader:-auto})"
     tail -20 "$log" | indent
     return
@@ -105,7 +120,7 @@ run_fixture() {  # run_fixture <name> <file> [loader]
   fi
 }
 
-run_fixture sample "$WORK/fixtures/sample.o"
+[[ -n "$SAMPLE" ]] && run_fixture sample "$SAMPLE"
 run_fixture dos "$WORK/fixtures/dos.exe" DosLoader
 run_fixture le "$WORK/fixtures/le.exe" LeLoader
 
@@ -137,7 +152,7 @@ check_mcp() {
     -Dapplication.tempdir="$WORK/mcp/temp" \
     -Dghidra.home="$INSTALL_DIR" -classpath "$cp" \
     com.xebyte.headless.GhidraMCPHeadlessServer \
-    --bind 127.0.0.1 --port "$MCP_PORT" --file "$WORK/fixtures/sample.o" \
+    --bind 127.0.0.1 --port "$MCP_PORT" --file "$SAMPLE" \
     > "$WORK/mcp.log" 2>&1 &
   MCP_PID=$!
   for ((i = 0; i < 120; i++)); do
@@ -183,7 +198,11 @@ print(names["compute"] if {"compute", "helper"} <= names.keys() else "")
   MCP_PID=""
 }
 
-check_mcp
+if [[ -n "$SAMPLE" ]]; then
+  check_mcp
+else
+  fail "GhidraMCP: not checked (needs sample.o, which clang could not build)"
+fi
 
 # ── 4. Snapshot report (never fails the run) ──────────────────────────────────
 normalize() {  # drop decompiler warning comments and trailing whitespace

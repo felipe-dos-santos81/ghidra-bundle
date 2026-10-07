@@ -35,7 +35,7 @@ Operational context, invariants and conventions for AI coding agents working in 
   - `lx-loader/` (`lib/lx-loader.jar`)
   - `dos-toolbox/` (`lib/dos-toolbox.jar`)
 - **Never rename an extension directory.** Outside development mode, Ghidra's `ClassSearcher` only scans `<ext>/lib/<jar>.jar` when the jar name starts with the directory name. A renamed extension still shows its scripts but silently loses its loaders, analyzers and plugins.
-- `make verify-extensions` (run by `make test`) uses `ghidra_scripts/VerifyExtensions.java` to confirm headlessly that each extension's key classes are loaded. Add a check there when adding an extension.
+- `make verify-extensions` (a pipeline stage before `07-venv`, and run again by `make test`) uses `ghidra_scripts/VerifyExtensions.java` to confirm headlessly that each extension's key classes are loaded. Add a check there when adding an extension.
 
 ### 2.3 Submodules & Versions
 - Upstream repositories are shallow submodules:
@@ -62,7 +62,7 @@ Operational context, invariants and conventions for AI coding agents working in 
 | Stage | Target (alias) | Description |
 | :--- | :--- | :--- |
 | `00` | `00-deps` (`deps`) | Installs missing OS packages (`apt`/`brew`) and `uv` |
-| `00` | `00-env` (`env`) | Checks JDK 21, Maven, Clang, Python 3, uv, Git |
+| `00` | `00-env` (`env`) | Checks JDK 21, Maven, Clang, Python 3, uv, Git, curl, GNU `timeout` (`gtimeout` on macOS) |
 | `01` | `01-checkout` (`checkout`) | Fetches submodules (`--depth 1`) |
 | `02` | `02-build-ghidra` (`build-ghidra`) | Checks the version pin, runs `build-ghidra.sh` |
 | `03` | `03-install-ghidra` (`install-ghidra`) | Extracts the zip to `dist/`, patches `launch.properties` |
@@ -73,7 +73,7 @@ Operational context, invariants and conventions for AI coding agents working in 
 | `08` | `08-register-mcp` (`register-mcp`) | Registers `ghidra` with opencode (atomic JSON write) and Claude Code (`claude mcp add --scope user`, skipped if `claude` is absent) |
 | — | `test` | Sanity suite (`tests/run-sanity.sh`): runs `verify-extensions`, imports the ELF/DOS/LE fixtures headlessly and checks them with `SanityCheck.java`, then checks GhidraMCP over HTTP on `TEST_MCP_PORT` (18089) |
 
-Runtime and maintenance: `install` (runs `$(PIPELINE)`, all of the above, ending with `test`; `verify-extensions` remains a standalone target), `run`, `run-bridge`, `verify` (probes `http://127.0.0.1:8089/check_connection`), `clean`, `distclean`.
+Runtime and maintenance: `install` (runs `$(PIPELINE)`, all of the above, with `verify-extensions` after stage 06 so a broken extension stops the install before MCP registration, ending with `test`), `run`, `run-bridge`, `verify` (probes `http://127.0.0.1:8089/check_connection`), `clean`, `distclean`.
 
 ---
 
