@@ -76,6 +76,8 @@ help: ## Show this help
 		for p in maven:mvn python@3.12:python3 uv:uv git:git coreutils:gtimeout; do \
 			command -v $${p#*:} >/dev/null 2>&1 || brew install $${p%%:*}; \
 		done; \
+		brew list stormlib >/dev/null 2>&1 || brew install stormlib || \
+			$(WARN) "stormlib not available from Homebrew; MPQ support stays off"; \
 		command -v clang >/dev/null 2>&1 || xcode-select --install; \
 	else \
 		PKGS=""; \
@@ -84,6 +86,8 @@ help: ## Show this help
 			command -v $${p#*:} >/dev/null 2>&1 || PKGS+=" $${p%%:*}"; \
 		done; \
 		python3 -c 'import venv' >/dev/null 2>&1 || PKGS+=" python3 python3-venv"; \
+		python3 -c 'import ctypes.util, sys; sys.exit(not ctypes.util.find_library("storm"))' \
+			|| PKGS+=" libstorm-dev"; \
 		if [ -n "$$PKGS" ]; then sudo apt update && sudo apt install -y $$PKGS || exit 1; \
 		else echo "All OS packages present."; fi; \
 		command -v uv >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh || exit 1; \
@@ -94,7 +98,7 @@ help: ## Show this help
 check_tool = command -v $(1) >/dev/null 2>&1 || { $(ERR) "$(2) not found on PATH (run 'make deps')"; exit 1; }; \
 	printf '\033[32m✔ %-7s\033[0m %s\n' "$(2)" "$$($(3) 2>&1 | head -n 1)"
 
-00-env: ## Check host prerequisites (JDK 21, Maven, Clang, Python 3, uv, Git, curl, GNU timeout)
+00-env: ## Check host prerequisites (JDK 21, Maven, Clang, Python 3, uv, Git, curl, GNU timeout; StormLib optional)
 	@[ -d "$(JAVA21_HOME)" ] || { $(ERR) "JDK 21 not found (run 'make deps')"; exit 1; }
 	@printf '\033[32m✔ %-7s\033[0m %s\n' "JDK 21" "$(JAVA21_HOME)"
 	@$(call check_tool,mvn,Maven,mvn -version)
@@ -104,6 +108,11 @@ check_tool = command -v $(1) >/dev/null 2>&1 || { $(ERR) "$(2) not found on PATH
 	@$(call check_tool,git,Git,git --version)
 	@$(call check_tool,curl,curl,curl --version)
 	@$(call check_tool,$(TIMEOUT_CMD),timeout,$(TIMEOUT_CMD) --version)
+	@if python3 -c 'import ctypes.util, sys; sys.exit(not ctypes.util.find_library("storm"))' 2>/dev/null; then \
+		printf '\033[32m✔ %-7s\033[0m %s\n' "StormLib" "found (MPQ support)"; \
+	else \
+		$(WARN) "StormLib not found: optional, needed to open MPQ archives (run 'make deps')"; \
+	fi
 	@$(OK) "Environment check passed."
 
 deps: 00-deps
@@ -333,7 +342,8 @@ clean: ## Remove dist/, .venv/ and all build outputs
 		dos-toolbox/dist dos-toolbox/build dos-toolbox/.gradle \
 		ret-sync/ext_ghidra/build ret-sync/ext_ghidra/.gradle \
 		GhidraFindcrypt/dist GhidraFindcrypt/build GhidraFindcrypt/.gradle \
-		binexport/java/dist binexport/java/build binexport/java/.gradle
+		binexport/java/dist binexport/java/build binexport/java/.gradle \
+		python/bundle-mpq/build python/bundle-mpq/bundle_mpq.egg-info
 
 distclean: clean ## clean, then de-initialize all submodules
 	git submodule deinit -f --all

@@ -16,3 +16,7 @@ Thumbs.db
 test_*.sh
 *.tmp
 scratch/
+
+# pip's in-tree build of python/bundle-mpq
+python/bundle-mpq/build/
+*.egg-info/

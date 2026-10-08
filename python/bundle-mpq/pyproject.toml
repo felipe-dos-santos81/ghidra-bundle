@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bundle-mpq"
+version = "1.0.0"
+description = "Read-only MPQ archive access through StormLib (ctypes), for PyGhidra scripts"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+
+[tool.setuptools]
+packages = ["bundle_mpq"]
