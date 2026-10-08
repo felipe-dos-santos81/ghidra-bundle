@@ -2,7 +2,8 @@
 # and GhidraDosToolbox. `make install` runs the numbered stages in order:
 #   00-deps → 00-env → 01-checkout → 02-build-ghidra → 03-install-ghidra →
 #   04-install-mcp → 05-install-lx-loader → 06-install-dos-toolbox →
-#   verify-extensions → 07-venv → 08-register-mcp → test
+#   09-install-retsync → 10-install-findcrypt →
+#   verify-extensions → 14-venv → 15-register-mcp → test
 # Every stage is idempotent and skips work that is already done.
 
 .NOTPARALLEL:
@@ -55,7 +56,8 @@ GHIDRA_ZIP = ghidra_$(1)_*_64.zip
 .PHONY: help 00-deps deps 00-env env 01-checkout checkout 02-build-ghidra build-ghidra \
 	03-install-ghidra install-ghidra 04-install-mcp install-mcp \
 	05-install-lx-loader install-lx-loader 06-install-dos-toolbox install-dos-toolbox \
-	verify-extensions test 07-venv venv 08-register-mcp register-mcp \
+	verify-extensions test 14-venv venv 15-register-mcp register-mcp \
+	09-install-retsync install-retsync 10-install-findcrypt install-findcrypt \
 	install run run-bridge verify clean distclean
 
 help: ## Show this help
@@ -192,6 +194,12 @@ endef
 06-install-dos-toolbox: 03-install-ghidra ## Build and install the GhidraDosToolbox extension
 	$(call install_extension,dos-toolbox,dos-toolbox,dos-toolbox/dist/ghidra_$(GHIDRA_VERSION)_*_dos-toolbox.zip,GhidraDosToolbox)
 
+09-install-retsync: 03-install-ghidra ## Build and install ret-sync (sync with x64dbg/WinDbg)
+	$(call install_extension,retsync,ret-sync,ret-sync/ext_ghidra/dist/ghidra_$(GHIDRA_VERSION)_*_retsync.zip,,ext_ghidra)
+
+10-install-findcrypt: 03-install-ghidra ## Build and install GhidraFindcrypt (crypto constants)
+	$(call install_extension,GhidraFindcrypt,GhidraFindcrypt,GhidraFindcrypt/dist/ghidra_$(GHIDRA_VERSION)_*_GhidraFindcrypt.zip)
+
 verify-extensions: ## Check headlessly that Ghidra loads every extension's classes
 	@[ -x "$(INSTALL_DIR)/support/analyzeHeadless" ] || { $(ERR) "Ghidra not installed; run 'make install'"; exit 1; }
 	@echo "Checking extension class discovery (headless)..."
@@ -213,10 +221,12 @@ verify-extensions: ## Check headlessly that Ghidra loads every extension's class
 install-mcp: 04-install-mcp
 install-lx-loader: 05-install-lx-loader
 install-dos-toolbox: 06-install-dos-toolbox
+install-retsync: 09-install-retsync
+install-findcrypt: 10-install-findcrypt
 
 # ── Stages 7–8: MCP bridge ────────────────────────────────────────────────────
 
-07-venv: 01-checkout ## Create .venv and install bridge-mcp-ghidra (editable)
+14-venv: 01-checkout ## Create .venv and install bridge-mcp-ghidra (editable)
 	@if [ -x "$(BRIDGE_BIN)" ]; then \
 		echo "$(VENV_DIR) already set up, skipping."; \
 	else \
@@ -245,7 +255,7 @@ else:
 endef
 export REGISTER_OPENCODE
 
-08-register-mcp: 07-venv ## Register the "ghidra" MCP server with opencode and Claude Code
+15-register-mcp: 14-venv ## Register the "ghidra" MCP server with opencode and Claude Code
 	@mkdir -p "$(dir $(OPENCODE_CONFIG))"
 	@python3 -c "$$REGISTER_OPENCODE"
 	@if ! command -v claude >/dev/null 2>&1; then \
@@ -257,13 +267,14 @@ export REGISTER_OPENCODE
 		claude mcp add --scope user ghidra -- "$(BRIDGE_BIN)" || exit 1; \
 	fi
 
-venv: 07-venv
-register-mcp: 08-register-mcp
+venv: 14-venv
+register-mcp: 15-register-mcp
 
 # ── Pipeline & runtime ────────────────────────────────────────────────────────
 
 PIPELINE := 00-deps 00-env 01-checkout 02-build-ghidra 03-install-ghidra 04-install-mcp \
-	05-install-lx-loader 06-install-dos-toolbox verify-extensions 07-venv 08-register-mcp test
+	05-install-lx-loader 06-install-dos-toolbox 09-install-retsync 10-install-findcrypt \
+	verify-extensions 14-venv 15-register-mcp test
 
 install: $(PIPELINE) ## Run the full pipeline (all stages above, in order)
 	@$(OK) "Ghidra Bundle installed. Run 'make run' to launch Ghidra."
@@ -294,7 +305,9 @@ verify: ## Check that the GhidraMCP plugin answers on port 8089
 clean: ## Remove dist/, .venv/ and all build outputs
 	rm -rf "$(DIST_DIR)" "$(VENV_DIR)" ghidra/build ghidra-mcp/target ghidra-mcp/build \
 		lx-loader/dist lx-loader/build lx-loader/.gradle \
-		dos-toolbox/dist dos-toolbox/build dos-toolbox/.gradle
+		dos-toolbox/dist dos-toolbox/build dos-toolbox/.gradle \
+		ret-sync/ext_ghidra/build ret-sync/ext_ghidra/.gradle \
+		GhidraFindcrypt/dist GhidraFindcrypt/build GhidraFindcrypt/.gradle
 
 distclean: clean ## clean, then de-initialize all submodules
 	git submodule deinit -f --all

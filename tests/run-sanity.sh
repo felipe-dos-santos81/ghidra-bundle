@@ -89,7 +89,7 @@ trap 'exit 130' INT TERM
 if want extensions; then
   echo "Checking extension class discovery..."
   if make -C "$REPO_DIR" -s verify-extensions INSTALL_DIR="$INSTALL_DIR" > "$WORK/verify.log" 2>&1; then
-    pass "extensions: GhidraMCP, lx-loader and dos-toolbox classes load"
+    pass "extensions: every bundled extension's classes load"
   else
     fail "extensions: some classes are not loaded"
     indent < "$WORK/verify.log"
@@ -257,9 +257,12 @@ PACKAGE_PATTERNS=(
   "GhidraMCP-*.zip"
   "ghidra_{v}_*_lx-loader.zip"
   "ghidra_{v}_*_dos-toolbox.zip"
+  "ghidra_{v}_*_retsync.zip"
+  "ghidra_{v}_*_GhidraFindcrypt.zip"
 )
 # Build folders that must hold no current zip once install has moved them.
-BUILD_OUTPUTS=(ghidra/build/dist ghidra-mcp/build/distributions lx-loader/dist dos-toolbox/dist)
+BUILD_OUTPUTS=(ghidra/build/dist ghidra-mcp/build/distributions lx-loader/dist dos-toolbox/dist
+               ret-sync/ext_ghidra/dist GhidraFindcrypt/dist)
 
 check_dist() {
   local version pattern dir n

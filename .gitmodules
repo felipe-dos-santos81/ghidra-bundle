@@ -16,3 +16,14 @@
 	url = https://github.com/plaes/GhidraDosToolbox.git
 	branch = wip-ghidra-12
 	shallow = true
+[submodule "ret-sync"]
+	path = ret-sync
+	url = https://github.com/bootleg/ret-sync.git
+	branch = master
+	shallow = true
+	ignore = untracked
+[submodule "GhidraFindcrypt"]
+	path = GhidraFindcrypt
+	url = https://github.com/antoniovazquezblanco/GhidraFindcrypt.git
+	branch = main
+	shallow = true

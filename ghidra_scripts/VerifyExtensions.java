@@ -23,6 +23,8 @@ public class VerifyExtensions extends GhidraScript {
 		check("lx-loader", Loader.class, "LeLoader");
 		check("dos-toolbox", Loader.class, "DosLoader");
 		check("dos-toolbox", Analyzer.class, "DosSyscallAnalyzer");
+		check("retsync", Plugin.class, "RetSyncPlugin");
+		check("GhidraFindcrypt", Analyzer.class, "FindCryptAnalyzer");
 	}
 
 	private void check(String extension, Class<? extends ExtensionPoint> kind, String className) {
