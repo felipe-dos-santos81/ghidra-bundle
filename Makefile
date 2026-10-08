@@ -251,7 +251,7 @@ install: $(PIPELINE) ## Run the full pipeline (all stages above, in order)
 
 test: ## Run the sanity test suite (fixtures, decompiler, extensions, GhidraMCP)
 	@[ -d "$(JAVA21_HOME)" ] || { $(ERR) "JDK 21 not found (run 'make deps')"; exit 1; }
-	@tests/run-sanity.sh "$(INSTALL_DIR)" "$(JAVA21_HOME)"
+	@PACKAGES_DIR="$(DIST_DIR)/packages" tests/run-sanity.sh "$(INSTALL_DIR)" "$(JAVA21_HOME)"
 
 run: ## Launch Ghidra (fails if port 8089 is already in use)
 	@[ -x "$(INSTALL_DIR)/ghidraRun" ] || { $(ERR) "Ghidra not installed; run 'make install'"; exit 1; }

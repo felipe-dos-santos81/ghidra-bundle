@@ -6,6 +6,9 @@
 # Env:   UPDATE_SNAPSHOTS=1  rewrite tests/snapshots/ from this run
 #        TEST_MCP_PORT=18089  port for the GhidraMCP test server (default 18089)
 #        TEST_IMPORT_TIMEOUT=600  seconds before a fixture import is killed (default 600)
+#        SANITY_ONLY=dist,jython  run only these sections: extensions, fixtures, mcp,
+#                                 dist, binexport, portable, jython, pyghidra
+#        PACKAGES_DIR=<dir>       built zips to check (default: <install dir>/../packages)
 # Needs GNU timeout (Linux: coreutils; macOS: `brew install coreutils` for gtimeout).
 set -euo pipefail
 
@@ -17,12 +20,32 @@ HEADLESS="$INSTALL_DIR/support/analyzeHeadless"
 
 PASSED=0
 FAILED=0
+SKIPPED=0
 RESULTS=()
 pass() { PASSED=$((PASSED + 1)); RESULTS+=("PASS  $1"); }
 fail() { FAILED=$((FAILED + 1)); RESULTS+=("FAIL  $1"); }
+skip() { SKIPPED=$((SKIPPED + 1)); RESULTS+=("SKIP  $1"); }
 die() { printf '\033[31mERROR: %s\033[0m\n' "$1" >&2; exit 1; }
 indent() { sed 's/^/    /'; }
 fail_with_log() { fail "$1"; tail -20 "$2" | indent; }  # fail_with_log <message> <log file>
+
+# want <section>: true when SANITY_ONLY is unset or lists <section> (comma-separated).
+SECTIONS=",extensions,fixtures,mcp,dist,binexport,portable,jython,pyghidra,"
+want() { [[ -z "${SANITY_ONLY:-}" || ",$SANITY_ONLY," == *",$1,"* ]]; }
+SANITY_ONLY=${SANITY_ONLY:-}
+for section in ${SANITY_ONLY//,/ }; do
+  [[ "$SECTIONS" == *",$section,"* ]] \
+    || die "unknown SANITY_ONLY section '$section' (known:${SECTIONS//,/ })"
+done
+
+# count_matches <dir> <glob>: number of files in <dir> matching <glob>.
+count_matches() {
+  local -a matches
+  shopt -s nullglob
+  matches=("$1"/$2)
+  shopt -u nullglob
+  echo "${#matches[@]}"
+}
 
 [[ -x "$HEADLESS" ]] || die "$HEADLESS not found; run 'make install' first."
 for tool in clang python3 curl; do
@@ -42,6 +65,7 @@ done
   || die "GNU timeout with --foreground not found (Linux: coreutils; macOS: brew install coreutils)."
 
 MCP_PORT="${TEST_MCP_PORT:-18089}"
+PACKAGES_DIR="${PACKAGES_DIR:-$(dirname "$INSTALL_DIR")/packages}"
 WORK=$(mktemp -d "$INSTALL_DIR/portable/temp/sanity-XXXXXX")
 # pkill -f takes an extended regex; escape the path so characters like [ ( + in it match literally.
 WORK_RE=$(printf '%s' "$WORK" | sed 's/[][\\.*^$+?(){}|]/\\&/g')
@@ -62,12 +86,14 @@ trap cleanup EXIT
 trap 'exit 130' INT TERM
 
 # ── 1. Extension classes ──────────────────────────────────────────────────────
-echo "Checking extension class discovery..."
-if make -C "$REPO_DIR" -s verify-extensions INSTALL_DIR="$INSTALL_DIR" > "$WORK/verify.log" 2>&1; then
-  pass "extensions: GhidraMCP, lx-loader and dos-toolbox classes load"
-else
-  fail "extensions: some classes are not loaded"
-  indent < "$WORK/verify.log"
+if want extensions; then
+  echo "Checking extension class discovery..."
+  if make -C "$REPO_DIR" -s verify-extensions INSTALL_DIR="$INSTALL_DIR" > "$WORK/verify.log" 2>&1; then
+    pass "extensions: GhidraMCP, lx-loader and dos-toolbox classes load"
+  else
+    fail "extensions: some classes are not loaded"
+    indent < "$WORK/verify.log"
+  fi
 fi
 
 # ── 2. Fixtures ───────────────────────────────────────────────────────────────
@@ -81,6 +107,21 @@ if ! clang --target=i386-unknown-linux-gnu -O1 -fno-pic -c "$TESTS/fixtures/samp
   SAMPLE=""
 fi
 python3 -I "$TESTS/make_fixtures.py" "$WORK/fixtures" > /dev/null
+printf '\x90\xc3' > "$WORK/probe.bin"  # NOP; RET: a program for scripts that need no real binary
+
+# run_script <log> <file> <script> [script args...]: import <file> into a throwaway project
+# and run <script> (from ghidra_scripts/ or tests/probes/) after analysis. Files ending
+# in .bin load raw as x86 without analysis. Returns analyzeHeadless's exit status.
+run_script() {
+  local log=$1 file=$2 script=$3
+  shift 3
+  local args=("$WORK/proj" "script-$RANDOM" -import "$file" -deleteProject
+              -scriptPath "$REPO_DIR/ghidra_scripts;$TESTS/probes" -postScript "$script" "$@")
+  if [[ "$file" == *.bin ]]; then
+    args+=(-loader BinaryLoader -processor x86:LE:32:default -noanalysis)
+  fi
+  "$TIMEOUT" --foreground "${TEST_IMPORT_TIMEOUT:-600}" "$HEADLESS" "${args[@]}" > "$log" 2>&1
+}
 
 # ── 3. Headless import + SanityCheck.java per fixture ─────────────────────────
 run_fixture() {  # run_fixture <name> <file> [loader]
@@ -120,9 +161,11 @@ run_fixture() {  # run_fixture <name> <file> [loader]
   done < "$out/results.txt"
 }
 
-[[ -n "$SAMPLE" ]] && run_fixture sample "$SAMPLE"
-run_fixture dos "$WORK/fixtures/dos.exe" DosLoader
-run_fixture le "$WORK/fixtures/le.exe" LeLoader
+if want fixtures; then
+  if [[ -n "$SAMPLE" ]]; then run_fixture sample "$SAMPLE"; fi
+  run_fixture dos "$WORK/fixtures/dos.exe" DosLoader
+  run_fixture le "$WORK/fixtures/le.exe" LeLoader
+fi
 
 # ── 3b. GhidraMCP end to end ──────────────────────────────────────────────────
 check_mcp() {
@@ -197,10 +240,12 @@ print(names["compute"] if {"compute", "helper"} <= names.keys() else "")
   stop_mcp
 }
 
-if [[ -n "$SAMPLE" ]]; then
-  check_mcp
-else
-  fail "GhidraMCP: not checked (needs sample.o, which clang could not build)"
+if want mcp; then
+  if [[ -n "$SAMPLE" ]]; then
+    check_mcp
+  else
+    fail "GhidraMCP: not checked (needs sample.o, which clang could not build)"
+  fi
 fi
 
 # ── 4. Snapshot report (never fails the run) ──────────────────────────────────
@@ -251,15 +296,17 @@ report_snapshots() (  # subshell, so nullglob stays local
   fi
 )
 
-report_snapshots
+if want fixtures; then report_snapshots; fi
 
 # ── 5. Summary ────────────────────────────────────────────────────────────────
 echo
+((PASSED + FAILED + SKIPPED > 0)) || fail "no checks ran (SANITY_ONLY=${SANITY_ONLY:-})"
 for r in "${RESULTS[@]}"; do
   case "$r" in
     PASS*) printf '  \033[32m%s\033[0m\n' "$r" ;;
+    SKIP*) printf '  \033[33m%s\033[0m\n' "$r" ;;
     *) printf '  \033[31m%s\033[0m\n' "$r" ;;
   esac
 done
-echo "$PASSED passed, $FAILED failed"
+echo "$PASSED passed, $FAILED failed, $SKIPPED skipped"
 [[ $FAILED == 0 ]]
