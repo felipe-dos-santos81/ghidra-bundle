@@ -30,6 +30,7 @@ public class VerifyExtensions extends GhidraScript {
 		check("BinExport", Exporter.class, "BinExportExporter");
 		check("Jython", GhidraScriptProvider.class, "JythonScriptProvider");
 		check("GhidrAssist", Plugin.class, "GhidrAssistPlugin");
+		check("plugin-ghidra", Plugin.class, "ReaiAPIServicePlugin");
 	}
 
 	private void check(String extension, Class<? extends ExtensionPoint> kind, String className) {

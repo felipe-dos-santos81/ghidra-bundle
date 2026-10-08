@@ -42,3 +42,8 @@
 	url = https://github.com/felipe-dos-santos81/GhidrAssist.git
 	branch = portable-settings
 	shallow = true
+[submodule "plugin-ghidra"]
+	path = plugin-ghidra
+	url = https://github.com/felipe-dos-santos81/plugin-ghidra.git
+	branch = portable-settings
+	shallow = true

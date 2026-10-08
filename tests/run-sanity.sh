@@ -271,11 +271,12 @@ PACKAGE_PATTERNS=(
   "ghidra_{v}_*_GhidraFindcrypt.zip"
   "ghidra_{v}_*_BinExport.zip"
   "ghidra_{v}_*_GhidrAssist.zip"
+  "ghidra_{v}_*_plugin-ghidra.zip"
 )
 # Build folders that must hold no current zip once install has moved them.
 BUILD_OUTPUTS=(ghidra/build/dist ghidra-mcp/build/distributions lx-loader/dist dos-toolbox/dist
                ret-sync/ext_ghidra/dist GhidraFindcrypt/dist binexport/java/dist
-               GhidrAssist/dist)
+               GhidrAssist/dist plugin-ghidra/dist)
 
 check_dist() {
   local version pattern dir n
@@ -365,7 +366,7 @@ check_leaks() {  # run last: fails for each leak path that appeared during the r
 
 if want portable; then
   check_pyghidra_settings
-  check_portable_paths GhidrAssist
+  check_portable_paths
 fi
 
 # ── 3f. Jython and D2GridraTools ──────────────────────────────────────────────

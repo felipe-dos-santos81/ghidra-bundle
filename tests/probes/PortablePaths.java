@@ -23,9 +23,9 @@ public class PortablePaths extends GhidraScript {
 		List<String> wanted = List.of(getScriptArgs());
 		if (wanted.isEmpty() || wanted.contains("GhidrAssist")) {
 			check("GhidrAssist Lucene index", () -> {
-				Class<?> os = Class.forName("ghidrassist.GAUtils$OperatingSystem");
+				Class<?> os = load("ghidrassist.GAUtils$OperatingSystem");
 				Object current = os.getMethod("detect").invoke(null);
-				return Class.forName("ghidrassist.GAUtils")
+				return load("ghidrassist.GAUtils")
 						.getMethod("getDefaultLucenePath", os)
 						.invoke(null, current);
 			});
@@ -38,8 +38,14 @@ public class PortablePaths extends GhidraScript {
 		}
 	}
 
+	// Script bundles only see the packages they import at compile time, so look the
+	// extension classes up through Ghidra's class loader, which holds every extension jar.
+	private static Class<?> load(String className) throws ClassNotFoundException {
+		return Class.forName(className, true, ClassLoader.getSystemClassLoader());
+	}
+
 	private static Object staticField(String className, String name) throws Exception {
-		Field field = Class.forName(className).getDeclaredField(name);
+		Field field = load(className).getDeclaredField(name);
 		field.setAccessible(true);
 		return field.get(null);
 	}
