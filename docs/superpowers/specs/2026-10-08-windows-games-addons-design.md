@@ -1,7 +1,7 @@
 # Windows Game Add-ons and Central `dist/packages/` — Design
 
 Date: 2026-10-08
-Status: approved in conversation; awaiting review of this written spec
+Status: approved; implemented (see section 12 for amendments)
 
 ## 1. Goal
 
@@ -314,3 +314,22 @@ for checks 1, 3 and 5.
 | 18089 | GhidraMCP test server | `make test` (unchanged) |
 | 9100 | ret-sync | only when enabled, 127.0.0.1 |
 | 1455, 1456 | GhidrAssist OAuth callback | only during an OAuth login |
+
+## 12. Amendments (2026-10-08, from planning and implementation)
+
+From planning:
+
+1. **MPQ reader:** use the ctypes wrapper `bundle_mpq` (`python/bundle-mpq/`) from the start. PyPI `mpq` was last released in 2016, and its `setup.py` imports `distutils`, which Python 3.12 removed.
+2. **Test MPQ:** written by `tests/make_mpq.py`, which writes the MPQ v1 container itself and gets PKWARE compression from StormLib's `SCompCompress`. `smpq` is dropped: Ubuntu noble's StormLib 9.22 aborts on every archive write (assertion in `FillWritableHandle`).
+3. **BinExport test:** `tests/probes/BinExportProbe.java` calls `BinExportExporter.export(...)` directly, because the shipped `BinExport.java` calls `askChoices`, which is awkward to drive headlessly.
+4. **Ghidra zip glob:** `ghidra_<ver>_*_64.zip` (the platform suffix: `linux_arm_64`, `mac_x86_64`, ...). `ghidra_<ver>_*.zip` also matches extension zips such as `ghidra_12.1.4_DEV_<date>_lx-loader.zip`.
+5. **Extension skip rule:** an extension stage skips only if its zip is also present in `dist/packages/`. Existing installs therefore rebuild each extension once.
+6. **Stage 13 without StormLib:** still installs `bundle_mpq`, which only loads libstorm when used, and warns.
+7. **Helpers:** helper scripts go in `scripts/` and test probes in `tests/probes/`. `run-sanity.sh` gets `SANITY_ONLY=<sections>`.
+8. **Fork check:** `tests/probes/PortablePaths.java` checks the forks' default paths headlessly.
+9. **Name lookups:** `bundle_mpq.MpqArchive.read()` turns `/` into `\`, because StormLib's lookups are case-insensitive but slash-sensitive.
+
+From implementation:
+
+10. **Stale same-version zips:** after moving the newest build output into `dist/packages/`, `install_extension` and stage 02 delete any other matches of the version-specific build glob (e.g. two 12.1.4 lx-loader zips from different build dates), so §3's "no current-version zip left behind" holds.
+11. **`PortablePaths.java` class lookup:** the probe loads extension classes through `ClassLoader.getSystemClassLoader()`; a script's OSGi bundle only sees packages imported at compile time.

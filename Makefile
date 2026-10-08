@@ -1,5 +1,6 @@
-# Ghidra Bundle: portable Ghidra built from source, with GhidraMCP, lx-loader
-# and GhidraDosToolbox. `make install` runs the numbered stages in order:
+# Ghidra Bundle: portable Ghidra built from source, with its extensions, Jython,
+# D2GridraTools and PyGhidra (see AGENTS.md). Built zips are collected in
+# dist/packages/. `make install` runs the numbered stages in order:
 #   00-deps → 00-env → 01-checkout → 02-build-ghidra → 03-install-ghidra →
 #   04-install-mcp → 05-install-lx-loader → 06-install-dos-toolbox →
 #   07-install-ghidrassist → 08-install-reveng →
@@ -348,7 +349,7 @@ PIPELINE := 00-deps 00-env 01-checkout 02-build-ghidra 03-install-ghidra 04-inst
 install: $(PIPELINE) ## Run the full pipeline (all stages above, in order)
 	@$(OK) "Ghidra Bundle installed. Run 'make run' to launch Ghidra."
 
-test: ## Run the sanity test suite (fixtures, decompiler, extensions, GhidraMCP)
+test: ## Run the sanity test suite (fixtures, extensions, GhidraMCP, dist, BinExport, Jython, PyGhidra, portable mode)
 	@[ -d "$(JAVA21_HOME)" ] || { $(ERR) "JDK 21 not found (run 'make deps')"; exit 1; }
 	@PACKAGES_DIR="$(DIST_DIR)/packages" tests/run-sanity.sh "$(INSTALL_DIR)" "$(JAVA21_HOME)"
 
