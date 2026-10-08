@@ -2,6 +2,7 @@
 # and GhidraDosToolbox. `make install` runs the numbered stages in order:
 #   00-deps → 00-env → 01-checkout → 02-build-ghidra → 03-install-ghidra →
 #   04-install-mcp → 05-install-lx-loader → 06-install-dos-toolbox →
+#   07-install-ghidrassist →
 #   09-install-retsync → 10-install-findcrypt → 11-install-binexport →
 #   12-install-scripts →
 #   verify-extensions → 13-pyghidra → 14-venv → 15-register-mcp → test
@@ -59,7 +60,7 @@ GHIDRA_ZIP = ghidra_$(1)_*_64.zip
 	03-install-ghidra install-ghidra 04-install-mcp install-mcp \
 	05-install-lx-loader install-lx-loader 06-install-dos-toolbox install-dos-toolbox \
 	verify-extensions test 14-venv venv 15-register-mcp register-mcp \
-	09-install-retsync install-retsync 10-install-findcrypt install-findcrypt \
+	07-install-ghidrassist install-ghidrassist 09-install-retsync install-retsync 10-install-findcrypt install-findcrypt \
 	11-install-binexport install-binexport 12-install-scripts install-scripts \
 	13-pyghidra pyghidra \
 	install run run-bridge verify clean distclean
@@ -212,6 +213,9 @@ endef
 06-install-dos-toolbox: 03-install-ghidra ## Build and install the GhidraDosToolbox extension
 	$(call install_extension,dos-toolbox,dos-toolbox,dos-toolbox/dist/ghidra_$(GHIDRA_VERSION)_*_dos-toolbox.zip,GhidraDosToolbox)
 
+07-install-ghidrassist: 03-install-ghidra ## Build and install GhidrAssist (LLM assistant; unconfigured)
+	$(call install_extension,GhidrAssist,GhidrAssist,GhidrAssist/dist/ghidra_$(GHIDRA_VERSION)_*_GhidrAssist.zip)
+
 09-install-retsync: 03-install-ghidra ## Build and install ret-sync (sync with x64dbg/WinDbg)
 	$(call install_extension,retsync,ret-sync,ret-sync/ext_ghidra/dist/ghidra_$(GHIDRA_VERSION)_*_retsync.zip,,ext_ghidra)
 
@@ -278,6 +282,7 @@ BUNDLE_MPQ_SRC := python/bundle-mpq
 install-mcp: 04-install-mcp
 install-lx-loader: 05-install-lx-loader
 install-dos-toolbox: 06-install-dos-toolbox
+install-ghidrassist: 07-install-ghidrassist
 install-retsync: 09-install-retsync
 install-findcrypt: 10-install-findcrypt
 install-binexport: 11-install-binexport
@@ -333,7 +338,7 @@ register-mcp: 15-register-mcp
 # ── Pipeline & runtime ────────────────────────────────────────────────────────
 
 PIPELINE := 00-deps 00-env 01-checkout 02-build-ghidra 03-install-ghidra 04-install-mcp \
-	05-install-lx-loader 06-install-dos-toolbox 09-install-retsync 10-install-findcrypt \
+	05-install-lx-loader 06-install-dos-toolbox 07-install-ghidrassist 09-install-retsync 10-install-findcrypt \
 	11-install-binexport 12-install-scripts verify-extensions 13-pyghidra 14-venv 15-register-mcp test
 
 install: $(PIPELINE) ## Run the full pipeline (all stages above, in order)
@@ -369,7 +374,8 @@ clean: ## Remove dist/, .venv/ and all build outputs
 		ret-sync/ext_ghidra/build ret-sync/ext_ghidra/.gradle \
 		GhidraFindcrypt/dist GhidraFindcrypt/build GhidraFindcrypt/.gradle \
 		binexport/java/dist binexport/java/build binexport/java/.gradle \
-		python/bundle-mpq/build python/bundle-mpq/bundle_mpq.egg-info
+		python/bundle-mpq/build python/bundle-mpq/bundle_mpq.egg-info \
+		GhidrAssist/dist GhidrAssist/build GhidrAssist/.gradle
 
 distclean: clean ## clean, then de-initialize all submodules
 	git submodule deinit -f --all

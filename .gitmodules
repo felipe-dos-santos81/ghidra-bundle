@@ -37,3 +37,8 @@
 	url = https://github.com/dzik87/D2GridraTools.git
 	branch = main
 	shallow = true
+[submodule "GhidrAssist"]
+	path = GhidrAssist
+	url = https://github.com/felipe-dos-santos81/GhidrAssist.git
+	branch = portable-settings
+	shallow = true

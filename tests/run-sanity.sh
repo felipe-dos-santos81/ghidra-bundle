@@ -270,10 +270,12 @@ PACKAGE_PATTERNS=(
   "ghidra_{v}_*_retsync.zip"
   "ghidra_{v}_*_GhidraFindcrypt.zip"
   "ghidra_{v}_*_BinExport.zip"
+  "ghidra_{v}_*_GhidrAssist.zip"
 )
 # Build folders that must hold no current zip once install has moved them.
 BUILD_OUTPUTS=(ghidra/build/dist ghidra-mcp/build/distributions lx-loader/dist dos-toolbox/dist
-               ret-sync/ext_ghidra/dist GhidraFindcrypt/dist binexport/java/dist)
+               ret-sync/ext_ghidra/dist GhidraFindcrypt/dist binexport/java/dist
+               GhidrAssist/dist)
 
 check_dist() {
   local version pattern dir n
@@ -332,6 +334,25 @@ check_pyghidra_settings() {
   fi
 }
 
+check_portable_paths() {  # check_portable_paths [extension dir...]: run PortablePaths.java
+  local log="$WORK/portable-paths.log" line
+  if ! run_script "$log" "$WORK/probe.bin" PortablePaths.java "$@"; then
+    fail_with_log "portable: PortablePaths.java did not run" "$log"
+    return
+  fi
+  if ! grep -q 'PORTABLE ' "$log"; then
+    fail_with_log "portable: PortablePaths.java printed nothing" "$log"
+    return
+  fi
+  while IFS= read -r line; do
+    line=${line% }
+    case "$line" in
+      "PORTABLE OK "*) pass "portable: ${line#PORTABLE OK }" ;;
+      *) fail "portable: ${line#PORTABLE }" ;;
+    esac
+  done < <(grep -o 'PORTABLE [A-Z]* [^(]*' "$log")
+}
+
 check_leaks() {  # run last: fails for each leak path that appeared during the run
   local leak
   for leak in "${LEAK_PATHS[@]}"; do
@@ -342,7 +363,10 @@ check_leaks() {  # run last: fails for each leak path that appeared during the r
   pass "portable: no writes outside portable/ were detected"
 }
 
-if want portable; then check_pyghidra_settings; fi
+if want portable; then
+  check_pyghidra_settings
+  check_portable_paths GhidrAssist
+fi
 
 # ── 3f. Jython and D2GridraTools ──────────────────────────────────────────────
 check_jython() {
