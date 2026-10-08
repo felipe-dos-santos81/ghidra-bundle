@@ -6,8 +6,10 @@ venv's Python; by hand:
 Archive tests are skipped when StormLib (libstorm) is missing.
 """
 import os
+import subprocess
 import sys
 import tempfile
+import types
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -63,6 +65,52 @@ class MpqArchiveTest(unittest.TestCase):
         mpq.close()
         with self.assertRaises(bundle_mpq.MpqError):
             mpq.read(NAME)
+
+
+_SYMBOLS = ["SFileOpenArchive", "SFileCloseArchive", "SFileOpenFileEx", "SFileGetFileSize",
+            "SFileReadFile", "SFileCloseFile", "SFileFindFirstFile", "SFileFindNextFile",
+            "SFileFindClose"]
+
+
+def _stub_library(*names):
+    """Something shaped like a ctypes CDLL that exports only the given symbols."""
+    lib = types.SimpleNamespace()
+    for name in names:
+        setattr(lib, name, types.SimpleNamespace(name=name))
+    return lib
+
+
+class DeclareTest(unittest.TestCase):
+    def test_accepts_newer_stormlib_error_function(self):
+        # StormLib 9.24 and later export SErrGetLastError instead of GetLastError.
+        lib = _stub_library(*_SYMBOLS, "SErrGetLastError")
+        bundle_mpq._declare(lib)
+        self.assertEqual(lib.bundle_last_error.name, "SErrGetLastError")
+
+    def test_accepts_older_stormlib_error_function(self):
+        lib = _stub_library(*_SYMBOLS, "GetLastError")
+        bundle_mpq._declare(lib)
+        self.assertEqual(lib.bundle_last_error.name, "GetLastError")
+
+    def test_missing_symbol_raises_mpq_error(self):
+        with self.assertRaises(bundle_mpq.MpqError) as ctx:
+            bundle_mpq._declare(_stub_library(*_SYMBOLS[1:], "GetLastError"))
+        self.assertIn("SFileOpenArchive", str(ctx.exception))
+
+
+class CheckCommandTest(unittest.TestCase):
+    def test_check_reports_why_stormlib_is_unusable(self):
+        env = dict(os.environ, BUNDLE_STORMLIB="/nonexistent/libstorm.so")
+        result = subprocess.run([sys.executable, "-m", "bundle_mpq", "--check"],
+                                env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("/nonexistent/libstorm.so", result.stderr)
+
+    @unittest.skipUnless(HAVE_STORMLIB, "StormLib (libstorm) not found")
+    def test_check_succeeds_with_stormlib(self):
+        result = subprocess.run([sys.executable, "-m", "bundle_mpq", "--check"],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 class LoadStormlibTest(unittest.TestCase):

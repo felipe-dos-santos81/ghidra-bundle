@@ -6,6 +6,7 @@
         data = mpq.read("data/global/excel/Weapons.txt")
 
 Set BUNDLE_STORMLIB to a libstorm path to use a specific library.
+`python -m bundle_mpq --check` reports whether StormLib can be used.
 """
 import ctypes
 import ctypes.util
@@ -44,7 +45,8 @@ def load_stormlib():
     """Load libstorm: only $BUNDLE_STORMLIB when set, else the usual library names."""
     override = os.environ.get("BUNDLE_STORMLIB")
     names = [override] if override else [
-        ctypes.util.find_library("storm"), "libstorm.so.9", "libstorm.so", "libstorm.dylib"]
+        ctypes.util.find_library("storm"), "libstorm.so.9", "libstorm.so", "libstorm.dylib",
+        "/opt/homebrew/lib/libstorm.dylib", "/usr/local/lib/libstorm.dylib"]  # Homebrew
     errors = []
     for name in filter(None, names):
         try:
@@ -52,13 +54,18 @@ def load_stormlib():
         except OSError as e:
             errors.append(str(e))
             continue
-        _declare(lib)
+        try:
+            _declare(lib)
+        except MpqError as e:
+            errors.append(f"{name}: {e}")
+            continue
         return lib
     raise MpqError("StormLib (libstorm) not found; install libstorm-dev or set BUNDLE_STORMLIB"
                    + (f" ({'; '.join(errors)})" if errors else ""))
 
 
 def _declare(lib):
+    """Set the ctypes signatures, and lib.bundle_last_error to StormLib's error function."""
     ptr, h = ctypes.POINTER, _HANDLE
     signatures = {
         "SFileOpenArchive": ([ctypes.c_char_p, _DWORD, _DWORD, ptr(h)], ctypes.c_bool),
@@ -70,11 +77,18 @@ def _declare(lib):
         "SFileFindFirstFile": ([h, ctypes.c_char_p, ptr(_FindData), ctypes.c_char_p], h),
         "SFileFindNextFile": ([h, ptr(_FindData)], ctypes.c_bool),
         "SFileFindClose": ([h], ctypes.c_bool),
-        "GetLastError": ([], _DWORD),
     }
     for name, (argtypes, restype) in signatures.items():
-        function = getattr(lib, name)
+        function = getattr(lib, name, None)
+        if function is None:
+            raise MpqError(f"StormLib does not export {name}")
         function.argtypes, function.restype = argtypes, restype
+    # StormLib 9.24 and later rename GetLastError to SErrGetLastError.
+    last_error = getattr(lib, "SErrGetLastError", None) or getattr(lib, "GetLastError", None)
+    if last_error is None:
+        raise MpqError("StormLib exports neither SErrGetLastError nor GetLastError")
+    last_error.argtypes, last_error.restype = [], _DWORD
+    lib.bundle_last_error = last_error
 
 
 class MpqArchive:
@@ -86,7 +100,7 @@ class MpqArchive:
         if not self._lib.SFileOpenArchive(os.fsencode(path), 0, _MPQ_OPEN_READ_ONLY,
                                           ctypes.byref(self._handle)):
             self._handle = _HANDLE()
-            raise MpqError(f"cannot open MPQ {path} (StormLib error {self._lib.GetLastError()})")
+            raise MpqError(f"cannot open MPQ {path} (StormLib error {self._lib.bundle_last_error()})")
 
     def close(self):
         if self._handle:
@@ -128,15 +142,15 @@ class MpqArchive:
         key = name.replace("/", "\\").encode("latin-1")
         if not self._lib.SFileOpenFileEx(self._handle, key, _SFILE_OPEN_FROM_MPQ,
                                          ctypes.byref(handle)):
-            raise MpqError(f"{name}: not in archive (StormLib error {self._lib.GetLastError()})")
+            raise MpqError(f"{name}: not in archive (StormLib error {self._lib.bundle_last_error()})")
         try:
             size = self._lib.SFileGetFileSize(handle, None)
             buf = ctypes.create_string_buffer(size)
             got = _DWORD()
             ok = self._lib.SFileReadFile(handle, buf, size, ctypes.byref(got), None)
-            if (not ok and self._lib.GetLastError() != _ERROR_HANDLE_EOF) or got.value != size:
+            if (not ok and self._lib.bundle_last_error() != _ERROR_HANDLE_EOF) or got.value != size:
                 raise MpqError(f"{name}: read {got.value} of {size} bytes "
-                               f"(StormLib error {self._lib.GetLastError()})")
+                               f"(StormLib error {self._lib.bundle_last_error()})")
             return buf.raw
         finally:
             self._lib.SFileCloseFile(handle)

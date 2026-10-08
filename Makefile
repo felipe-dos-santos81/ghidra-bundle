@@ -280,8 +280,8 @@ BUNDLE_MPQ_SRC := python/bundle-mpq
 		echo "$$SRC" > "$$VENV/.bundle-mpq-source"; \
 		$(OK) "PyGhidra venv ready at $$VENV."; \
 	fi; \
-	"$$PY" -I -c 'import bundle_mpq; bundle_mpq.load_stormlib()' 2>/dev/null || \
-		$(WARN) "StormLib not found: bundle_mpq is installed but cannot open MPQs (run 'make deps')."
+	MSG=$$("$$PY" -I -m bundle_mpq --check 2>&1) || \
+		$(WARN) "bundle_mpq is installed but cannot open MPQs: $$MSG (run 'make deps')."
 
 install-mcp: 04-install-mcp
 install-lx-loader: 05-install-lx-loader

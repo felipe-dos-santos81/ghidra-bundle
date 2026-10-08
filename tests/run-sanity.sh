@@ -400,14 +400,14 @@ if want jython; then check_jython; fi
 # ── 3g. PyGhidra and MPQ ──────────────────────────────────────────────────────
 check_pyghidra() {
   local venv log="$WORK/pyghidra.log" mpq="$WORK/fixtures/test.mpq"
-  local expected="$WORK/fixtures/test.mpq.bytes" name path status=0
+  local expected="$WORK/fixtures/test.mpq.bytes" name path reason status=0
   venv=$(python3 -I "$REPO_DIR/scripts/pyghidra-venv-dir.py" "$INSTALL_DIR")
   if ! "$venv/bin/python3" -I -c 'import pyghidra, bundle_mpq' 2>/dev/null; then
     fail "PyGhidra: $venv lacks pyghidra or bundle_mpq (run 'make pyghidra')"
     return
   fi
-  if ! "$venv/bin/python3" -I -c 'import bundle_mpq; bundle_mpq.load_stormlib()' 2>/dev/null; then
-    skip "PyGhidra MPQ: StormLib (libstorm) not found"
+  if ! reason=$("$venv/bin/python3" -I -m bundle_mpq --check 2>&1); then
+    skip "PyGhidra MPQ: $reason"
     return
   fi
   if "$venv/bin/python3" -I "$TESTS/test_bundle_mpq.py" > "$WORK/bundle_mpq.log" 2>&1; then
