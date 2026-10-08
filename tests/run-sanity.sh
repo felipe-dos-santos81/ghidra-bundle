@@ -248,6 +248,47 @@ if want mcp; then
   fi
 fi
 
+# ── 3c. dist/packages ─────────────────────────────────────────────────────────
+# Zips that must each match exactly one file in $PACKAGES_DIR ({v} = Ghidra version).
+# Ghidra's own zip ends in its platform (linux_arm_64, mac_x86_64, ...); extension
+# zips also start with ghidra_{v}_, so "_64.zip" keeps the two apart.
+PACKAGE_PATTERNS=(
+  "ghidra_{v}_*_64.zip"
+  "GhidraMCP-*.zip"
+  "ghidra_{v}_*_lx-loader.zip"
+  "ghidra_{v}_*_dos-toolbox.zip"
+)
+# Build folders that must hold no current zip once install has moved them.
+BUILD_OUTPUTS=(ghidra/build/dist ghidra-mcp/build/distributions lx-loader/dist dos-toolbox/dist)
+
+check_dist() {
+  local version pattern dir n
+  version=$(sed -n 's/^application\.version=//p' "$INSTALL_DIR/Ghidra/application.properties")
+  for pattern in "${PACKAGE_PATTERNS[@]}"; do
+    pattern=${pattern//\{v\}/$version}
+    n=$(count_matches "$PACKAGES_DIR" "$pattern")
+    if ((n == 1)); then
+      pass "dist: packages/ has $pattern"
+    else
+      fail "dist: $n files match $pattern in $PACKAGES_DIR (want 1)"
+    fi
+  done
+  for dir in "${BUILD_OUTPUTS[@]}"; do
+    if [[ "$dir" == ghidra-mcp/* ]]; then  # GhidraMCP zips carry their own version
+      n=$(count_matches "$REPO_DIR/$dir" "*.zip")
+    else
+      n=$(count_matches "$REPO_DIR/$dir" "*${version}*.zip")
+    fi
+    if ((n == 0)); then
+      pass "dist: $dir holds no current zip"
+    else
+      fail "dist: $dir still holds $n current zip(s); install moves them to packages/"
+    fi
+  done
+}
+
+if want dist; then check_dist; fi
+
 # ── 4. Snapshot report (never fails the run) ──────────────────────────────────
 normalize() {  # drop decompiler warning comments and trailing whitespace
   sed -E -e '/^[[:space:]]*\/\* WARNING.*\*\/[[:space:]]*$/d' -e 's/[[:space:]]+$//' "$1"

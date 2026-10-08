@@ -17,6 +17,7 @@ MCP_PORT := 8089
 
 BUNDLE_DIR := $(CURDIR)
 DIST_DIR := $(BUNDLE_DIR)/dist
+PACKAGES_DIR := $(DIST_DIR)/packages
 INSTALL_DIR := $(DIST_DIR)/ghidra_$(GHIDRA_VERSION)_PUBLIC
 PORTABLE_DIR := $(INSTALL_DIR)/portable
 EXT_DIR := $(INSTALL_DIR)/Ghidra/Extensions
@@ -46,6 +47,10 @@ export PATH := $(JAVA21_HOME)/bin:$(HOME)/.local/bin:$(HOME)/.cargo/bin:$(PATH)
 OK = printf '\033[32m%s\033[0m\n'
 WARN = printf '\033[33m%s\033[0m\n'
 ERR = printf '\033[31mERROR: %s\033[0m\n'
+
+# Ghidra's own zip name ends in its platform (linux_arm_64, mac_x86_64, ...). Extension
+# zips also start with ghidra_<version>_, so match on "_64.zip" to tell them apart.
+GHIDRA_ZIP = ghidra_$(1)_*_64.zip
 
 .PHONY: help 00-deps deps 00-env env 01-checkout checkout 02-build-ghidra build-ghidra \
 	03-install-ghidra install-ghidra 04-install-mcp install-mcp \
@@ -105,21 +110,26 @@ env: 00-env
 	git submodule sync --recursive --quiet
 	git submodule update --init --recursive --depth 1
 
-02-build-ghidra: 01-checkout ## Build the Ghidra distribution zip from source
+02-build-ghidra: 01-checkout ## Build the Ghidra distribution zip from source into dist/packages/
 	@grep -qx 'application.version=$(GHIDRA_VERSION)' ghidra/Ghidra/application.properties || \
 		{ $(ERR) "ghidra submodule is not Ghidra $(GHIDRA_VERSION): update GHIDRA_VERSION or the submodule"; exit 1; }
-	@if compgen -G "ghidra/build/dist/ghidra_$(GHIDRA_VERSION)_*.zip" >/dev/null; then \
-		echo "Ghidra $(GHIDRA_VERSION) zip already built, skipping."; \
+	@if compgen -G "$(PACKAGES_DIR)/$(call GHIDRA_ZIP,$(GHIDRA_VERSION))" >/dev/null; then \
+		echo "Ghidra $(GHIDRA_VERSION) zip already in $(PACKAGES_DIR), skipping."; \
 	else \
-		./build-ghidra.sh; \
+		compgen -G "ghidra/build/dist/$(call GHIDRA_ZIP,$(GHIDRA_VERSION))" >/dev/null || ./build-ghidra.sh || exit 1; \
+		ZIP=$$(ls -1t ghidra/build/dist/$(call GHIDRA_ZIP,$(GHIDRA_VERSION)) 2>/dev/null | head -n 1); \
+		[ -n "$$ZIP" ] || { $(ERR) "no Ghidra $(GHIDRA_VERSION) zip in ghidra/build/dist/"; exit 1; }; \
+		mkdir -p "$(PACKAGES_DIR)" && rm -f "$(PACKAGES_DIR)"/$(call GHIDRA_ZIP,*) && \
+			mv "$$ZIP" "$(PACKAGES_DIR)/" && rm -f ghidra/build/dist/$(call GHIDRA_ZIP,$(GHIDRA_VERSION)) || exit 1; \
+		$(OK) "Moved $${ZIP##*/} to $(PACKAGES_DIR)."; \
 	fi
 
 03-install-ghidra: 02-build-ghidra ## Extract Ghidra into dist/ and enable portable mode
 	@if grep -qs '^# --- Portable Mode Overrides ---' "$(INSTALL_DIR)/support/launch.properties"; then \
 		echo "$(INSTALL_DIR) already installed, skipping."; \
 	else \
-		ZIP=$$(ls -1t ghidra/build/dist/ghidra_$(GHIDRA_VERSION)_*.zip 2>/dev/null | head -n 1); \
-		[ -n "$$ZIP" ] || { $(ERR) "no Ghidra zip in ghidra/build/dist/"; exit 1; }; \
+		ZIP=$$(ls -1t "$(PACKAGES_DIR)"/$(call GHIDRA_ZIP,$(GHIDRA_VERSION)) 2>/dev/null | head -n 1); \
+		[ -n "$$ZIP" ] || { $(ERR) "no Ghidra zip in $(PACKAGES_DIR)/"; exit 1; }; \
 		mkdir -p "$(DIST_DIR)"; \
 		TMP=$$(mktemp -d "$(DIST_DIR)/.extract-XXXXXX"); \
 		unzip -q -o "$$ZIP" -d "$$TMP" || exit 1; \
@@ -141,26 +151,35 @@ install-ghidra: 03-install-ghidra
 
 # ── Stages 4–6: Extensions ────────────────────────────────────────────────────
 
-# $(call install_extension,directory,source dir,zip glob[,legacy directory to remove])
-# Builds an extension with ghidra/gradlew and unzips it into $(EXT_DIR). The source
-# commit is recorded in <ext>/.bundle-source; the stage rebuilds when it changes.
+# $(call install_extension,directory,source dir,zip glob[,legacy directory to remove][,gradle subdir])
+# Builds an extension with ghidra/gradlew (in <source dir>/<gradle subdir>), moves the
+# zip into $(PACKAGES_DIR) and unzips it into $(EXT_DIR). The zip glob names the build
+# output and contains $(GHIDRA_VERSION); older versions of that zip in $(PACKAGES_DIR)
+# and stale builds left in the build folder are deleted. The source commit is recorded
+# in <ext>/.bundle-source; the stage rebuilds when it changes or when the zip is
+# missing from $(PACKAGES_DIR).
 # Never rename the unzipped directory: Ghidra only loads classes from
 # <ext>/lib/<jar> when the jar name starts with the directory name, so a
 # renamed extension silently loses its loaders, analyzers and plugins.
 define install_extension
 @SRC=$$(git -C $(2) rev-parse HEAD 2>/dev/null); \
-if [ -d "$(EXT_DIR)/$(1)" ] && { [ -z "$$SRC" ] || [ "$$(cat "$(EXT_DIR)/$(1)/.bundle-source" 2>/dev/null)" = "$$SRC" ]; }; then \
+if [ -d "$(EXT_DIR)/$(1)" ] && compgen -G "$(PACKAGES_DIR)/$(notdir $(3))" >/dev/null && \
+	{ [ -z "$$SRC" ] || [ "$$(cat "$(EXT_DIR)/$(1)/.bundle-source" 2>/dev/null)" = "$$SRC" ]; }; then \
 	echo "$(1) already installed$${SRC:+ from $${SRC:0:7}}, skipping."; \
 else \
 	echo "Building $(1)$${SRC:+ from $${SRC:0:7}}..."; \
-	(cd $(2) && ../ghidra/gradlew -p . -PGHIDRA_INSTALL_DIR="$(INSTALL_DIR)" buildExtension) || exit 1; \
+	(cd "$(2)/$(or $(5),.)" && "$(BUNDLE_DIR)/ghidra/gradlew" -p . \
+		-PGHIDRA_INSTALL_DIR="$(INSTALL_DIR)" buildExtension) || exit 1; \
 	ZIP=$$(ls -1t $(3) 2>/dev/null | head -n 1); \
 	[ -n "$$ZIP" ] || { $(ERR) "no zip matching $(3)"; exit 1; }; \
+	mkdir -p "$(PACKAGES_DIR)" && rm -f "$(PACKAGES_DIR)"/$(subst $(GHIDRA_VERSION),*,$(notdir $(3))) && \
+		mv "$$ZIP" "$(PACKAGES_DIR)/" && rm -f $(3) || exit 1; \
+	ZIP="$(PACKAGES_DIR)/$${ZIP##*/}"; \
 	rm -rf "$(EXT_DIR)/$(1)" $(if $(4),"$(EXT_DIR)/$(4)"); \
 	unzip -q -o "$$ZIP" -d "$(EXT_DIR)" || exit 1; \
 	[ -d "$(EXT_DIR)/$(1)" ] || { $(ERR) "$$ZIP did not create $(EXT_DIR)/$(1)"; exit 1; }; \
 	[ -z "$$SRC" ] || echo "$$SRC" > "$(EXT_DIR)/$(1)/.bundle-source"; \
-	$(OK) "$(1) installed."; \
+	$(OK) "$(1) installed ($${ZIP##*/} in $(PACKAGES_DIR))."; \
 fi
 endef
 
