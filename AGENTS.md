@@ -24,7 +24,7 @@ Operational context, invariants and conventions for AI coding agents working in 
 ## 2. Invariants
 
 ### 2.1 Portable Mode & Filesystem Isolation
-- **Never write to `~/.ghidra`, `~/.config/GhidrAssist` or `~/.reai`**: Ghidra and the bundled extensions run in portable mode. `make test` fails if any of them (or a directory literally named `${INSTALL_DIR}`) appears during the run.
+- **Never write outside `portable/`**: not to Ghidra's own defaults (`~/.config/ghidra` or `$XDG_CONFIG_HOME`, `~/Library/ghidra`, `/var/tmp/<user>-ghidra` or `$XDG_CACHE_HOME`; `~/.ghidra` before 11.1), nor to `~/.config/GhidrAssist` or `~/.reai`. `make test` fails if any of them (or a directory literally named `${INSTALL_DIR}`) appears during the run, and requires the forks' default paths to lie under this install's `portable/settings`.
 - `03-install-ghidra` appends this block to `support/launch.properties`, with the absolute install path:
   ```properties
   # --- Portable Mode Overrides ---

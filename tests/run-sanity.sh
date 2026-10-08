@@ -86,10 +86,17 @@ trap cleanup EXIT
 trap 'exit 130' INT TERM
 
 # Paths that must not appear while the suite runs: Ghidra and the bundled extensions
-# keep everything under portable/. "${INSTALL_DIR}" is the relative directory PyGhidra's
-# launcher would create from an unexpanded launch.properties line.
-LEAK_PATHS=("$HOME/.ghidra" "$HOME/.config/GhidrAssist" "$HOME/.reai"
+# keep everything under portable/. They cover Ghidra's own defaults (settings in
+# $XDG_CONFIG_HOME, ~/.config or ~/Library, cache in $XDG_CACHE_HOME or /var/tmp, named
+# "ghidra" or "<user>-ghidra"; ~/.ghidra before 11.1), the GhidrAssist and RevEng.AI
+# defaults, and "${INSTALL_DIR}", the relative directory PyGhidra's launcher would create
+# from an unexpanded launch.properties line.
+ME=$(id -un)
+LEAK_PATHS=("$HOME/.ghidra" "$HOME/.config/GhidrAssist" "$HOME/.reai" "/var/tmp/$ME-ghidra"
             "$REPO_DIR/\${INSTALL_DIR}" "$PWD/\${INSTALL_DIR}" "$WORK/\${INSTALL_DIR}")
+for dir in "${XDG_CONFIG_HOME:-$HOME/.config}" "$HOME/Library" ${XDG_CACHE_HOME:+"$XDG_CACHE_HOME"}; do
+  LEAK_PATHS+=("$dir/ghidra" "$dir/$ME-ghidra")
+done
 LEAKS_BEFORE=$'\n'
 for leak in "${LEAK_PATHS[@]}"; do
   if [[ -e "$leak" ]]; then LEAKS_BEFORE+="$leak"$'\n'; fi
@@ -348,20 +355,22 @@ check_portable_paths() {  # check_portable_paths [extension dir...]: run Portabl
   while IFS= read -r line; do
     line=${line% }
     case "$line" in
-      "PORTABLE OK "*) pass "portable: ${line#PORTABLE OK }" ;;
+      "PORTABLE OK "*"$INSTALL_DIR/portable/settings/"*) pass "portable: ${line#PORTABLE OK }" ;;
+      "PORTABLE OK "*) fail "portable: ${line#PORTABLE OK } is not under portable/settings" ;;
       *) fail "portable: ${line#PORTABLE }" ;;
     esac
   done < <(grep -o 'PORTABLE [A-Z]* [^(]*' "$log")
 }
 
 check_leaks() {  # run last: fails for each leak path that appeared during the run
-  local leak
+  local leak leaked=0
   for leak in "${LEAK_PATHS[@]}"; do
     if [[ -e "$leak" && "$LEAKS_BEFORE" != *$'\n'"$leak"$'\n'* ]]; then
       fail "portable: $leak was created during the run"
+      leaked=1
     fi
   done
-  pass "portable: no writes outside portable/ were detected"
+  if ((leaked == 0)); then pass "portable: no writes outside portable/ were detected"; fi
 }
 
 if want portable; then
