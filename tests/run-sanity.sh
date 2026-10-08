@@ -13,6 +13,8 @@
 set -euo pipefail
 
 INSTALL_DIR=${1:?usage: run-sanity.sh <ghidra install dir> <JDK 21 home>}
+# Absolute, so path checks and the pyghidraRun call (made from $WORK) see the same path.
+INSTALL_DIR=$(cd "$INSTALL_DIR" && pwd -P) || { echo "ERROR: no directory $1" >&2; exit 1; }
 export JAVA_HOME=${2:?usage: run-sanity.sh <ghidra install dir> <JDK 21 home>}
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TESTS="$REPO_DIR/tests"
@@ -410,7 +412,10 @@ if want jython; then check_jython; fi
 check_pyghidra() {
   local venv log="$WORK/pyghidra.log" mpq="$WORK/fixtures/test.mpq"
   local expected="$WORK/fixtures/test.mpq.bytes" name path reason status=0
-  venv=$(python3 -I "$REPO_DIR/scripts/pyghidra-venv-dir.py" "$INSTALL_DIR")
+  if ! venv=$(python3 -I "$REPO_DIR/scripts/pyghidra-venv-dir.py" "$INSTALL_DIR" 2>&1); then
+    fail "PyGhidra: cannot locate its venv: $venv"
+    return
+  fi
   if ! "$venv/bin/python3" -I -c 'import pyghidra, bundle_mpq' 2>/dev/null; then
     fail "PyGhidra: $venv lacks pyghidra or bundle_mpq (run 'make pyghidra')"
     return
@@ -424,7 +429,10 @@ check_pyghidra() {
   else
     fail_with_log "PyGhidra: bundle_mpq unit tests" "$WORK/bundle_mpq.log"
   fi
-  name=$("$venv/bin/python3" -I "$TESTS/make_mpq.py" "$mpq" "$expected")
+  if ! name=$("$venv/bin/python3" -I "$TESTS/make_mpq.py" "$mpq" "$expected" 2> "$WORK/make_mpq.log"); then
+    fail_with_log "PyGhidra: make_mpq.py could not build the test MPQ" "$WORK/make_mpq.log"
+    return
+  fi
   # pyghidraRun prompts (input()) when it is not in its own venv: run it outside any
   # active virtualenv and with no stdin, so a prompt fails fast instead of hanging.
   path=$PATH

@@ -18,6 +18,7 @@ _MAX_PATH = 1024              # StormPort.h, non-Windows
 _MPQ_OPEN_READ_ONLY = 0x100   # STREAM_FLAG_READ_ONLY
 _SFILE_OPEN_FROM_MPQ = 0
 _ERROR_HANDLE_EOF = 1002      # StormPort.h, non-Windows
+_SFILE_INVALID_SIZE = 0xFFFFFFFF
 _DWORD = ctypes.c_uint
 _HANDLE = ctypes.c_void_p
 
@@ -91,11 +92,22 @@ def _declare(lib):
     lib.bundle_last_error = last_error
 
 
+_stormlib = None
+
+
+def _shared_stormlib():
+    """StormLib loaded once per process, for MpqArchive."""
+    global _stormlib
+    if _stormlib is None:
+        _stormlib = load_stormlib()
+    return _stormlib
+
+
 class MpqArchive:
     """A read-only MPQ archive."""
 
     def __init__(self, path):
-        self._lib = load_stormlib()
+        self._lib = _shared_stormlib()
         self._handle = _HANDLE()
         if not self._lib.SFileOpenArchive(os.fsencode(path), 0, _MPQ_OPEN_READ_ONLY,
                                           ctypes.byref(self._handle)):
@@ -145,6 +157,9 @@ class MpqArchive:
             raise MpqError(f"{name}: not in archive (StormLib error {self._lib.bundle_last_error()})")
         try:
             size = self._lib.SFileGetFileSize(handle, None)
+            if size == _SFILE_INVALID_SIZE:
+                raise MpqError(f"{name}: cannot get its size "
+                               f"(StormLib error {self._lib.bundle_last_error()})")
             buf = ctypes.create_string_buffer(size)
             got = _DWORD()
             ok = self._lib.SFileReadFile(handle, buf, size, ctypes.byref(got), None)

@@ -29,6 +29,10 @@ EXT_DIR := $(INSTALL_DIR)/Ghidra/Extensions
 VENV_DIR := $(BUNDLE_DIR)/.venv
 BRIDGE_BIN := $(VENV_DIR)/bin/bridge-mcp-ghidra
 OPENCODE_CONFIG := $(HOME)/.config/opencode/opencode.json
+BUNDLE_MPQ_SRC := python/bundle-mpq
+# Succeeds when bundle_mpq can load StormLib (same search as at run time, Homebrew paths included).
+STORMLIB_CHECK = python3 -I -c 'import sys; sys.path.insert(0, "$(BUNDLE_DIR)/$(BUNDLE_MPQ_SRC)"); \
+	from bundle_mpq import load_stormlib; load_stormlib()'
 
 UNAME_S := $(shell uname -s)
 # GNU timeout, needed by `make test`: coreutils on Linux, Homebrew's gtimeout on macOS.
@@ -91,7 +95,7 @@ help: ## Show this help
 		python3 -c 'import venv' >/dev/null 2>&1 || PKGS+=" python3 python3-venv"; \
 		if [ -n "$$PKGS" ]; then sudo apt update && sudo apt install -y $$PKGS || exit 1; \
 		else echo "All OS packages present."; fi; \
-		python3 -c 'import ctypes.util, sys; sys.exit(not ctypes.util.find_library("storm"))' || \
+		$(STORMLIB_CHECK) 2>/dev/null || \
 			sudo apt install -y libstorm-dev || \
 			$(WARN) "libstorm-dev could not be installed; MPQ support stays off"; \
 		command -v uv >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh || exit 1; \
@@ -112,7 +116,7 @@ check_tool = command -v $(1) >/dev/null 2>&1 || { $(ERR) "$(2) not found on PATH
 	@$(call check_tool,git,Git,git --version)
 	@$(call check_tool,curl,curl,curl --version)
 	@$(call check_tool,$(TIMEOUT_CMD),timeout,$(TIMEOUT_CMD) --version)
-	@if python3 -c 'import ctypes.util, sys; sys.exit(not ctypes.util.find_library("storm"))' 2>/dev/null; then \
+	@if $(STORMLIB_CHECK) 2>/dev/null; then \
 		printf '\033[32m✔ %-7s\033[0m %s\n' "StormLib" "found (MPQ support)"; \
 	else \
 		$(WARN) "StormLib not found: optional, needed to open MPQ archives (run 'make deps')"; \
@@ -142,12 +146,23 @@ env: 00-env
 		$(OK) "Moved $${ZIP##*/} to $(PACKAGES_DIR)."; \
 	fi
 
+# The block 03-install-ghidra appends to launch.properties. Its paths are absolute
+# (PyGhidra's launcher does not expand ${INSTALL_DIR}), so stage 03 rewrites the block
+# whenever it differs: old ${INSTALL_DIR} installs, a moved checkout, a new JDK.
+PORTABLE_BLOCK = '\# --- Portable Mode Overrides ---' \
+	'JAVA_HOME_OVERRIDE=$(JAVA21_HOME)' \
+	'VMARGS=-Dapplication.settingsdir=$(PORTABLE_DIR)/settings' \
+	'VMARGS=-Dapplication.cachedir=$(PORTABLE_DIR)/cache' \
+	'VMARGS=-Dapplication.tempdir=$(PORTABLE_DIR)/temp'
+
 03-install-ghidra: 02-build-ghidra ## Extract Ghidra into dist/ and enable portable mode
 	@if grep -qs '^# --- Portable Mode Overrides ---' "$(LAUNCH_PROPS)"; then \
-		if sed -n '/^# --- Portable Mode Overrides ---/,$$p' "$(LAUNCH_PROPS)" | grep -qF '$${INSTALL_DIR}'; then \
-			sed '/^# --- Portable Mode Overrides ---/,$$ s|$${INSTALL_DIR}|$(INSTALL_DIR)|g' "$(LAUNCH_PROPS)" \
+		EXPECTED=$$(printf '%s\n' $(PORTABLE_BLOCK)); \
+		if [ "$$(sed -n '/^# --- Portable Mode Overrides ---/,$$p' "$(LAUNCH_PROPS)")" != "$$EXPECTED" ]; then \
+			[ -d "$(JAVA21_HOME)" ] || { $(ERR) "JDK 21 not found (run 'make deps')"; exit 1; }; \
+			{ sed '/^# --- Portable Mode Overrides ---/,$$d' "$(LAUNCH_PROPS)" && echo "$$EXPECTED"; } \
 				> "$(LAUNCH_PROPS).tmp" && mv "$(LAUNCH_PROPS).tmp" "$(LAUNCH_PROPS)" || exit 1; \
-			$(OK) "Rewrote the portable-mode paths in launch.properties as absolute paths."; \
+			$(OK) "Rewrote the portable-mode block in launch.properties for $(INSTALL_DIR)."; \
 		fi; \
 		echo "$(INSTALL_DIR) already installed, skipping."; \
 	else \
@@ -159,12 +174,7 @@ env: 00-env
 		rm -rf "$(INSTALL_DIR)"; \
 		mv "$$TMP"/ghidra_$(GHIDRA_VERSION)_* "$(INSTALL_DIR)" && rmdir "$$TMP" || exit 1; \
 		mkdir -p "$(PORTABLE_DIR)"/{settings,cache,temp} "$(EXT_DIR)"; \
-		printf '%s\n' '' '# --- Portable Mode Overrides ---' \
-			'JAVA_HOME_OVERRIDE=$(JAVA21_HOME)' \
-			'VMARGS=-Dapplication.settingsdir=$(PORTABLE_DIR)/settings' \
-			'VMARGS=-Dapplication.cachedir=$(PORTABLE_DIR)/cache' \
-			'VMARGS=-Dapplication.tempdir=$(PORTABLE_DIR)/temp' \
-			>> "$(LAUNCH_PROPS)"; \
+		printf '%s\n' '' $(PORTABLE_BLOCK) >> "$(LAUNCH_PROPS)"; \
 		$(OK) "Installed $(INSTALL_DIR) in portable mode."; \
 	fi
 
@@ -172,7 +182,7 @@ checkout: 01-checkout
 build-ghidra: 02-build-ghidra
 install-ghidra: 03-install-ghidra
 
-# ── Stages 4–6: Extensions ────────────────────────────────────────────────────
+# ── Stages 4–13: Extensions, scripts and PyGhidra ─────────────────────────────
 
 # $(call install_extension,directory,source dir,zip glob[,legacy directory to remove][,gradle subdir])
 # Builds an extension with ghidra/gradlew (in <source dir>/<gradle subdir>), moves the
@@ -260,8 +270,6 @@ verify-extensions: ## Check headlessly that Ghidra loads every extension's class
 	fi
 	@$(OK) "All extension classes loaded."
 
-BUNDLE_MPQ_SRC := python/bundle-mpq
-
 13-pyghidra: 03-install-ghidra ## Set up PyGhidra's venv (in portable/) with the bundle_mpq MPQ reader
 	@VENV=$$(python3 -I scripts/pyghidra-venv-dir.py "$(INSTALL_DIR)") || exit 1; \
 	PY="$$VENV/bin/python3"; WHEELS="$(INSTALL_DIR)/Ghidra/Features/PyGhidra/pypkg/dist"; \
@@ -276,6 +284,7 @@ BUNDLE_MPQ_SRC := python/bundle-mpq
 			*) $(ERR) "python3 is $$PYVER; PyGhidra supports $$SUPPORTED"; exit 1 ;; esac; \
 		[ -x "$$PY" ] || python3 -m venv "$$VENV" || exit 1; \
 		"$$PY" -m pip install -q --no-index -f "$$WHEELS" pyghidra setuptools wheel || exit 1; \
+		rm -rf "$(BUNDLE_MPQ_SRC)/build"; \
 		"$$PY" -m pip install -q --no-index --no-build-isolation --no-deps --force-reinstall \
 			"./$(BUNDLE_MPQ_SRC)" || exit 1; \
 		echo "$$SRC" > "$$VENV/.bundle-mpq-source"; \
@@ -295,7 +304,7 @@ install-binexport: 11-install-binexport
 install-scripts: 12-install-scripts
 pyghidra: 13-pyghidra
 
-# ── Stages 7–8: MCP bridge ────────────────────────────────────────────────────
+# ── Stages 14–15: MCP bridge ──────────────────────────────────────────────────
 
 14-venv: 01-checkout ## Create .venv and install bridge-mcp-ghidra (editable)
 	@if [ -x "$(BRIDGE_BIN)" ]; then \
@@ -352,7 +361,7 @@ install: $(PIPELINE) ## Run the full pipeline (all stages above, in order)
 
 test: ## Run the sanity test suite (fixtures, extensions, GhidraMCP, dist, BinExport, Jython, PyGhidra, portable mode)
 	@[ -d "$(JAVA21_HOME)" ] || { $(ERR) "JDK 21 not found (run 'make deps')"; exit 1; }
-	@PACKAGES_DIR="$(DIST_DIR)/packages" tests/run-sanity.sh "$(INSTALL_DIR)" "$(JAVA21_HOME)"
+	@PACKAGES_DIR="$(PACKAGES_DIR)" tests/run-sanity.sh "$(INSTALL_DIR)" "$(JAVA21_HOME)"
 
 run: ## Launch Ghidra (fails if port 8089 is already in use)
 	@[ -x "$(INSTALL_DIR)/ghidraRun" ] || { $(ERR) "Ghidra not installed; run 'make install'"; exit 1; }

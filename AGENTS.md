@@ -33,7 +33,7 @@ Operational context, invariants and conventions for AI coding agents working in 
   VMARGS=-Dapplication.cachedir=<INSTALL_DIR>/portable/cache
   VMARGS=-Dapplication.tempdir=<INSTALL_DIR>/portable/temp
   ```
-  The paths must be absolute: PyGhidra's launcher reads `application.settingsdir` without expanding `${INSTALL_DIR}`. Stage 03 rewrites old installs that still have `${INSTALL_DIR}` in the block.
+  The paths must be absolute: PyGhidra's launcher reads `application.settingsdir` without expanding `${INSTALL_DIR}`. Stage 03 rewrites the block whenever it differs from the expected one (old installs with `${INSTALL_DIR}`, a moved checkout, a new JDK).
 - The GhidrAssist and RevEng.AI forks keep their data under Ghidra's user settings directory (`portable/settings/.../GhidrAssist`, `.../reai/reai.json`); `tests/probes/PortablePaths.java` checks their defaults.
 - All preferences, caches and temp files live under `dist/ghidra_12.1.4_PUBLIC/portable/`. Headless runs (`analyzeHeadless`) read the same `launch.properties`, so they write there too.
 - To test whether the patch is already applied, grep for `^# --- Portable Mode Overrides ---`, not `application.settingsdir`, which also matches upstream's commented lines.

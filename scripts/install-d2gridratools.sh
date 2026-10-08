@@ -15,7 +15,9 @@ VERSION=${3:?$usage}
 DEST="$EXT_DIR/D2GridraTools"
 
 commit=$(git -C "$SRC" rev-parse HEAD)
-if [[ -f "$DEST/.bundle-source" && "$(cat "$DEST/.bundle-source")" == "$commit" ]]; then
+# Reinstall when the upstream commit or this script (how the copies are made) changes.
+stamp="$commit $(git hash-object "${BASH_SOURCE[0]}")"
+if [[ -f "$DEST/.bundle-source" && "$(cat "$DEST/.bundle-source")" == "$stamp" ]]; then
   echo "D2GridraTools already installed from ${commit:0:7}, skipping."
   exit 0
 fi
@@ -49,7 +51,7 @@ for script in "${scripts[@]}"; do
   fi
 done
 
-echo "$commit" > "$tmp/.bundle-source"
+echo "$stamp" > "$tmp/.bundle-source"
 rm -rf "$DEST"
 mv "$tmp" "$DEST"
 trap - EXIT
