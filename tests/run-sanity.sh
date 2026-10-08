@@ -344,6 +344,34 @@ check_leaks() {  # run last: fails for each leak path that appeared during the r
 
 if want portable; then check_pyghidra_settings; fi
 
+# ── 3f. Jython and D2GridraTools ──────────────────────────────────────────────
+check_jython() {
+  local log="$WORK/jython.log" d2="$INSTALL_DIR/Ghidra/Extensions/D2GridraTools/ghidra_scripts"
+  local f total=0 tagged=0
+  if run_script "$log" "$WORK/probe.bin" JythonProbe.py && grep -q 'JYTHON OK' "$log"; then
+    pass "Jython: a @runtime Jython script runs under Jython"
+  else
+    fail_with_log "Jython: JythonProbe.py did not run under Jython" "$log"
+  fi
+  for f in "$d2"/*.py; do
+    if [[ ! -e "$f" ]]; then continue; fi
+    total=$((total + 1))
+    if grep -q '^#[[:space:]]*@runtime Jython' "$f"; then tagged=$((tagged + 1)); fi
+  done
+  if ((total > 0 && tagged == total)); then
+    pass "D2GridraTools: all $total scripts run under Jython"
+  else
+    fail "D2GridraTools: $tagged of $total scripts tagged '@runtime Jython' in $d2"
+  fi
+  if grep -q '@runtime Jython' "$d2/Imports fixer.py" 2>/dev/null; then
+    pass "D2GridraTools: script names with spaces are kept"
+  else
+    fail "D2GridraTools: 'Imports fixer.py' is missing or untagged in $d2"
+  fi
+}
+
+if want jython; then check_jython; fi
+
 if want portable; then check_leaks; fi
 
 # ── 4. Snapshot report (never fails the run) ──────────────────────────────────

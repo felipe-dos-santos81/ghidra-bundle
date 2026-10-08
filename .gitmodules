@@ -32,3 +32,8 @@
 	url = https://github.com/google/binexport.git
 	branch = main
 	shallow = true
+[submodule "D2GridraTools"]
+	path = D2GridraTools
+	url = https://github.com/dzik87/D2GridraTools.git
+	branch = main
+	shallow = true

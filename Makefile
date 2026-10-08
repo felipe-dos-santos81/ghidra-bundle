@@ -3,6 +3,7 @@
 #   00-deps → 00-env → 01-checkout → 02-build-ghidra → 03-install-ghidra →
 #   04-install-mcp → 05-install-lx-loader → 06-install-dos-toolbox →
 #   09-install-retsync → 10-install-findcrypt → 11-install-binexport →
+#   12-install-scripts →
 #   verify-extensions → 14-venv → 15-register-mcp → test
 # Every stage is idempotent and skips work that is already done.
 
@@ -59,7 +60,7 @@ GHIDRA_ZIP = ghidra_$(1)_*_64.zip
 	05-install-lx-loader install-lx-loader 06-install-dos-toolbox install-dos-toolbox \
 	verify-extensions test 14-venv venv 15-register-mcp register-mcp \
 	09-install-retsync install-retsync 10-install-findcrypt install-findcrypt \
-	11-install-binexport install-binexport \
+	11-install-binexport install-binexport 12-install-scripts install-scripts \
 	install run run-bridge verify clean distclean
 
 help: ## Show this help
@@ -210,6 +211,18 @@ endef
 11-install-binexport: 03-install-ghidra ## Build and install BinExport (exports for BinDiff)
 	$(call install_extension,BinExport,binexport,binexport/java/dist/ghidra_$(GHIDRA_VERSION)_*_BinExport.zip,,java)
 
+12-install-scripts: 03-install-ghidra ## Install Jython and the D2GridraTools scripts (run under Jython)
+	@if [ -d "$(EXT_DIR)/Jython" ]; then \
+		echo "Jython already installed, skipping."; \
+	else \
+		ZIP=$$(ls -1t "$(INSTALL_DIR)"/Extensions/Ghidra/ghidra_$(GHIDRA_VERSION)_*_Jython.zip 2>/dev/null | head -n 1); \
+		[ -n "$$ZIP" ] || { $(ERR) "no Jython extension zip in $(INSTALL_DIR)/Extensions/Ghidra/"; exit 1; }; \
+		unzip -q -o "$$ZIP" -d "$(EXT_DIR)" || exit 1; \
+		[ -d "$(EXT_DIR)/Jython" ] || { $(ERR) "$$ZIP did not create $(EXT_DIR)/Jython"; exit 1; }; \
+		$(OK) "Jython installed."; \
+	fi
+	@scripts/install-d2gridratools.sh D2GridraTools "$(EXT_DIR)" "$(GHIDRA_VERSION)"
+
 verify-extensions: ## Check headlessly that Ghidra loads every extension's classes
 	@[ -x "$(INSTALL_DIR)/support/analyzeHeadless" ] || { $(ERR) "Ghidra not installed; run 'make install'"; exit 1; }
 	@echo "Checking extension class discovery (headless)..."
@@ -234,6 +247,7 @@ install-dos-toolbox: 06-install-dos-toolbox
 install-retsync: 09-install-retsync
 install-findcrypt: 10-install-findcrypt
 install-binexport: 11-install-binexport
+install-scripts: 12-install-scripts
 
 # ── Stages 7–8: MCP bridge ────────────────────────────────────────────────────
 
@@ -285,7 +299,7 @@ register-mcp: 15-register-mcp
 
 PIPELINE := 00-deps 00-env 01-checkout 02-build-ghidra 03-install-ghidra 04-install-mcp \
 	05-install-lx-loader 06-install-dos-toolbox 09-install-retsync 10-install-findcrypt \
-	11-install-binexport verify-extensions 14-venv 15-register-mcp test
+	11-install-binexport 12-install-scripts verify-extensions 14-venv 15-register-mcp test
 
 install: $(PIPELINE) ## Run the full pipeline (all stages above, in order)
 	@$(OK) "Ghidra Bundle installed. Run 'make run' to launch Ghidra."

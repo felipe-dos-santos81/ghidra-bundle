@@ -11,6 +11,7 @@ import ghidra.app.util.exporter.Exporter;
 import ghidra.app.util.opinion.Loader;
 import ghidra.framework.plugintool.Plugin;
 import ghidra.app.script.GhidraScript;
+import ghidra.app.script.GhidraScriptProvider;
 import ghidra.util.classfinder.ClassSearcher;
 import ghidra.util.classfinder.ExtensionPoint;
 
@@ -27,6 +28,7 @@ public class VerifyExtensions extends GhidraScript {
 		check("retsync", Plugin.class, "RetSyncPlugin");
 		check("GhidraFindcrypt", Analyzer.class, "FindCryptAnalyzer");
 		check("BinExport", Exporter.class, "BinExportExporter");
+		check("Jython", GhidraScriptProvider.class, "JythonScriptProvider");
 	}
 
 	private void check(String extension, Class<? extends ExtensionPoint> kind, String className) {
