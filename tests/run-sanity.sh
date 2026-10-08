@@ -85,6 +85,16 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
+# Paths that must not appear while the suite runs: Ghidra and the bundled extensions
+# keep everything under portable/. "${INSTALL_DIR}" is the relative directory PyGhidra's
+# launcher would create from an unexpanded launch.properties line.
+LEAK_PATHS=("$HOME/.ghidra" "$HOME/.config/GhidrAssist" "$HOME/.reai"
+            "$REPO_DIR/\${INSTALL_DIR}" "$PWD/\${INSTALL_DIR}" "$WORK/\${INSTALL_DIR}")
+LEAKS_BEFORE=$'\n'
+for leak in "${LEAK_PATHS[@]}"; do
+  if [[ -e "$leak" ]]; then LEAKS_BEFORE+="$leak"$'\n'; fi
+done
+
 # ── 1. Extension classes ──────────────────────────────────────────────────────
 if want extensions; then
   echo "Checking extension class discovery..."
@@ -310,6 +320,31 @@ if want binexport; then
     fail "BinExport: not checked (needs sample.o, which clang could not build)"
   fi
 fi
+
+# ── 3e. Portable mode ─────────────────────────────────────────────────────────
+check_pyghidra_settings() {
+  local settings
+  settings=$(python3 -I "$REPO_DIR/scripts/pyghidra-venv-dir.py" "$INSTALL_DIR" --settings 2>&1) || true
+  if [[ "$settings" == "$INSTALL_DIR/portable/settings/"* ]]; then
+    pass "portable: pyghidraRun keeps its settings and venv under portable/settings"
+  else
+    fail "portable: pyghidraRun would keep its settings in '$settings'"
+  fi
+}
+
+check_leaks() {  # run last: fails for each leak path that appeared during the run
+  local leak
+  for leak in "${LEAK_PATHS[@]}"; do
+    if [[ -e "$leak" && "$LEAKS_BEFORE" != *$'\n'"$leak"$'\n'* ]]; then
+      fail "portable: $leak was created during the run"
+    fi
+  done
+  pass "portable: no writes outside portable/ were detected"
+}
+
+if want portable; then check_pyghidra_settings; fi
+
+if want portable; then check_leaks; fi
 
 # ── 4. Snapshot report (never fails the run) ──────────────────────────────────
 normalize() {  # drop decompiler warning comments and trailing whitespace

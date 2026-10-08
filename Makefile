@@ -21,6 +21,7 @@ DIST_DIR := $(BUNDLE_DIR)/dist
 PACKAGES_DIR := $(DIST_DIR)/packages
 INSTALL_DIR := $(DIST_DIR)/ghidra_$(GHIDRA_VERSION)_PUBLIC
 PORTABLE_DIR := $(INSTALL_DIR)/portable
+LAUNCH_PROPS := $(INSTALL_DIR)/support/launch.properties
 EXT_DIR := $(INSTALL_DIR)/Ghidra/Extensions
 VENV_DIR := $(BUNDLE_DIR)/.venv
 BRIDGE_BIN := $(VENV_DIR)/bin/bridge-mcp-ghidra
@@ -128,7 +129,12 @@ env: 00-env
 	fi
 
 03-install-ghidra: 02-build-ghidra ## Extract Ghidra into dist/ and enable portable mode
-	@if grep -qs '^# --- Portable Mode Overrides ---' "$(INSTALL_DIR)/support/launch.properties"; then \
+	@if grep -qs '^# --- Portable Mode Overrides ---' "$(LAUNCH_PROPS)"; then \
+		if sed -n '/^# --- Portable Mode Overrides ---/,$$p' "$(LAUNCH_PROPS)" | grep -qF '$${INSTALL_DIR}'; then \
+			sed '/^# --- Portable Mode Overrides ---/,$$ s|$${INSTALL_DIR}|$(INSTALL_DIR)|g' "$(LAUNCH_PROPS)" \
+				> "$(LAUNCH_PROPS).tmp" && mv "$(LAUNCH_PROPS).tmp" "$(LAUNCH_PROPS)" || exit 1; \
+			$(OK) "Rewrote the portable-mode paths in launch.properties as absolute paths."; \
+		fi; \
 		echo "$(INSTALL_DIR) already installed, skipping."; \
 	else \
 		ZIP=$$(ls -1t "$(PACKAGES_DIR)"/$(call GHIDRA_ZIP,$(GHIDRA_VERSION)) 2>/dev/null | head -n 1); \
@@ -141,10 +147,10 @@ env: 00-env
 		mkdir -p "$(PORTABLE_DIR)"/{settings,cache,temp} "$(EXT_DIR)"; \
 		printf '%s\n' '' '# --- Portable Mode Overrides ---' \
 			'JAVA_HOME_OVERRIDE=$(JAVA21_HOME)' \
-			'VMARGS=-Dapplication.settingsdir=$${INSTALL_DIR}/portable/settings' \
-			'VMARGS=-Dapplication.cachedir=$${INSTALL_DIR}/portable/cache' \
-			'VMARGS=-Dapplication.tempdir=$${INSTALL_DIR}/portable/temp' \
-			>> "$(INSTALL_DIR)/support/launch.properties"; \
+			'VMARGS=-Dapplication.settingsdir=$(PORTABLE_DIR)/settings' \
+			'VMARGS=-Dapplication.cachedir=$(PORTABLE_DIR)/cache' \
+			'VMARGS=-Dapplication.tempdir=$(PORTABLE_DIR)/temp' \
+			>> "$(LAUNCH_PROPS)"; \
 		$(OK) "Installed $(INSTALL_DIR) in portable mode."; \
 	fi
 
