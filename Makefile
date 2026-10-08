@@ -4,7 +4,7 @@
 #   04-install-mcp → 05-install-lx-loader → 06-install-dos-toolbox →
 #   09-install-retsync → 10-install-findcrypt → 11-install-binexport →
 #   12-install-scripts →
-#   verify-extensions → 14-venv → 15-register-mcp → test
+#   verify-extensions → 13-pyghidra → 14-venv → 15-register-mcp → test
 # Every stage is idempotent and skips work that is already done.
 
 .NOTPARALLEL:
@@ -61,6 +61,7 @@ GHIDRA_ZIP = ghidra_$(1)_*_64.zip
 	verify-extensions test 14-venv venv 15-register-mcp register-mcp \
 	09-install-retsync install-retsync 10-install-findcrypt install-findcrypt \
 	11-install-binexport install-binexport 12-install-scripts install-scripts \
+	13-pyghidra pyghidra \
 	install run run-bridge verify clean distclean
 
 help: ## Show this help
@@ -250,6 +251,30 @@ verify-extensions: ## Check headlessly that Ghidra loads every extension's class
 	fi
 	@$(OK) "All extension classes loaded."
 
+BUNDLE_MPQ_SRC := python/bundle-mpq
+
+13-pyghidra: 03-install-ghidra ## Set up PyGhidra's venv (in portable/) with the bundle_mpq MPQ reader
+	@VENV=$$(python3 -I scripts/pyghidra-venv-dir.py "$(INSTALL_DIR)") || exit 1; \
+	PY="$$VENV/bin/python3"; WHEELS="$(INSTALL_DIR)/Ghidra/Features/PyGhidra/pypkg/dist"; \
+	SRC=$$(git hash-object $(BUNDLE_MPQ_SRC)/pyproject.toml $(BUNDLE_MPQ_SRC)/bundle_mpq/*.py | tr -d '\n'); \
+	if [ -x "$$PY" ] && [ "$$(cat "$$VENV/.bundle-mpq-source" 2>/dev/null)" = "$$SRC" ] && \
+		"$$PY" -I -c 'import pyghidra, bundle_mpq' 2>/dev/null; then \
+		echo "PyGhidra venv $$VENV already set up, skipping."; \
+	else \
+		SUPPORTED=$$(sed -n 's/^application\.python\.supported=//p' "$(INSTALL_DIR)/Ghidra/application.properties"); \
+		PYVER=$$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])'); \
+		case ", $$SUPPORTED," in *", $$PYVER,"*) ;; \
+			*) $(ERR) "python3 is $$PYVER; PyGhidra supports $$SUPPORTED"; exit 1 ;; esac; \
+		[ -x "$$PY" ] || python3 -m venv "$$VENV" || exit 1; \
+		"$$PY" -m pip install -q --no-index -f "$$WHEELS" pyghidra setuptools wheel || exit 1; \
+		"$$PY" -m pip install -q --no-index --no-build-isolation --no-deps --force-reinstall \
+			"./$(BUNDLE_MPQ_SRC)" || exit 1; \
+		echo "$$SRC" > "$$VENV/.bundle-mpq-source"; \
+		$(OK) "PyGhidra venv ready at $$VENV."; \
+	fi; \
+	"$$PY" -I -c 'import bundle_mpq; bundle_mpq.load_stormlib()' 2>/dev/null || \
+		$(WARN) "StormLib not found: bundle_mpq is installed but cannot open MPQs (run 'make deps')."
+
 install-mcp: 04-install-mcp
 install-lx-loader: 05-install-lx-loader
 install-dos-toolbox: 06-install-dos-toolbox
@@ -257,6 +282,7 @@ install-retsync: 09-install-retsync
 install-findcrypt: 10-install-findcrypt
 install-binexport: 11-install-binexport
 install-scripts: 12-install-scripts
+pyghidra: 13-pyghidra
 
 # ── Stages 7–8: MCP bridge ────────────────────────────────────────────────────
 
@@ -308,7 +334,7 @@ register-mcp: 15-register-mcp
 
 PIPELINE := 00-deps 00-env 01-checkout 02-build-ghidra 03-install-ghidra 04-install-mcp \
 	05-install-lx-loader 06-install-dos-toolbox 09-install-retsync 10-install-findcrypt \
-	11-install-binexport 12-install-scripts verify-extensions 14-venv 15-register-mcp test
+	11-install-binexport 12-install-scripts verify-extensions 13-pyghidra 14-venv 15-register-mcp test
 
 install: $(PIPELINE) ## Run the full pipeline (all stages above, in order)
 	@$(OK) "Ghidra Bundle installed. Run 'make run' to launch Ghidra."

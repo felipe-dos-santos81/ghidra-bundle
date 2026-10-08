@@ -20,3 +20,4 @@ scratch/
 # pip's in-tree build of python/bundle-mpq
 python/bundle-mpq/build/
 *.egg-info/
+__pycache__/

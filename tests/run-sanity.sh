@@ -372,6 +372,49 @@ check_jython() {
 
 if want jython; then check_jython; fi
 
+# ── 3g. PyGhidra and MPQ ──────────────────────────────────────────────────────
+check_pyghidra() {
+  local venv log="$WORK/pyghidra.log" mpq="$WORK/fixtures/test.mpq"
+  local expected="$WORK/fixtures/test.mpq.bytes" name path status=0
+  venv=$(python3 -I "$REPO_DIR/scripts/pyghidra-venv-dir.py" "$INSTALL_DIR")
+  if ! "$venv/bin/python3" -I -c 'import pyghidra, bundle_mpq' 2>/dev/null; then
+    fail "PyGhidra: $venv lacks pyghidra or bundle_mpq (run 'make pyghidra')"
+    return
+  fi
+  if ! "$venv/bin/python3" -I -c 'import bundle_mpq; bundle_mpq.load_stormlib()' 2>/dev/null; then
+    skip "PyGhidra MPQ: StormLib (libstorm) not found"
+    return
+  fi
+  if "$venv/bin/python3" -I "$TESTS/test_bundle_mpq.py" > "$WORK/bundle_mpq.log" 2>&1; then
+    pass "PyGhidra: bundle_mpq unit tests"
+  else
+    fail_with_log "PyGhidra: bundle_mpq unit tests" "$WORK/bundle_mpq.log"
+  fi
+  name=$("$venv/bin/python3" -I "$TESTS/make_mpq.py" "$mpq" "$expected")
+  # pyghidraRun prompts (input()) when it is not in its own venv: run it outside any
+  # active virtualenv and with no stdin, so a prompt fails fast instead of hanging.
+  path=$PATH
+  if [[ -n "${VIRTUAL_ENV:-}" ]]; then path=${path//"$VIRTUAL_ENV/bin:"/}; fi
+  (cd "$WORK" && env -u VIRTUAL_ENV PATH="$path" "$TIMEOUT" --foreground "${TEST_IMPORT_TIMEOUT:-600}" \
+    "$INSTALL_DIR/support/pyghidraRun" -H "$WORK/proj" "pyghidra-$RANDOM" \
+    -import "$WORK/probe.bin" -loader BinaryLoader -processor x86:LE:32:default -noanalysis \
+    -deleteProject -scriptPath "$TESTS/probes" -preScript mpq_probe.py "$mpq" "$name" "$expected" \
+    < /dev/null > "$log" 2>&1) || status=$?
+  ((status == 0)) || echo "pyghidraRun exit status $status" >> "$log"
+  if grep -qF "Switching to Ghidra virtual environment: $venv" "$log"; then
+    pass "PyGhidra: pyghidraRun uses the bundle's venv"
+  else
+    fail_with_log "PyGhidra: pyghidraRun did not use $venv" "$log"
+  fi
+  if grep -q 'MPQ OK' "$log"; then
+    pass "PyGhidra: bundle_mpq reads a PKWARE-compressed MPQ inside Ghidra"
+  else
+    fail_with_log "PyGhidra: mpq_probe.py did not read the MPQ" "$log"
+  fi
+}
+
+if want pyghidra; then check_pyghidra; fi
+
 if want portable; then check_leaks; fi
 
 # ── 4. Snapshot report (never fails the run) ──────────────────────────────────
