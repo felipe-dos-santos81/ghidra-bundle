@@ -89,10 +89,11 @@ help: ## Show this help
 			command -v $${p#*:} >/dev/null 2>&1 || PKGS+=" $${p%%:*}"; \
 		done; \
 		python3 -c 'import venv' >/dev/null 2>&1 || PKGS+=" python3 python3-venv"; \
-		python3 -c 'import ctypes.util, sys; sys.exit(not ctypes.util.find_library("storm"))' \
-			|| PKGS+=" libstorm-dev"; \
 		if [ -n "$$PKGS" ]; then sudo apt update && sudo apt install -y $$PKGS || exit 1; \
 		else echo "All OS packages present."; fi; \
+		python3 -c 'import ctypes.util, sys; sys.exit(not ctypes.util.find_library("storm"))' || \
+			sudo apt install -y libstorm-dev || \
+			$(WARN) "libstorm-dev could not be installed; MPQ support stays off"; \
 		command -v uv >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh || exit 1; \
 	fi
 	@$(OK) "System dependencies ready."
