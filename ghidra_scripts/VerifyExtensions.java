@@ -7,6 +7,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import ghidra.app.services.Analyzer;
+import ghidra.app.util.exporter.Exporter;
 import ghidra.app.util.opinion.Loader;
 import ghidra.framework.plugintool.Plugin;
 import ghidra.app.script.GhidraScript;
@@ -25,6 +26,7 @@ public class VerifyExtensions extends GhidraScript {
 		check("dos-toolbox", Analyzer.class, "DosSyscallAnalyzer");
 		check("retsync", Plugin.class, "RetSyncPlugin");
 		check("GhidraFindcrypt", Analyzer.class, "FindCryptAnalyzer");
+		check("BinExport", Exporter.class, "BinExportExporter");
 	}
 
 	private void check(String extension, Class<? extends ExtensionPoint> kind, String className) {

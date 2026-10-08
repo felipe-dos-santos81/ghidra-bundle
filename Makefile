@@ -2,7 +2,7 @@
 # and GhidraDosToolbox. `make install` runs the numbered stages in order:
 #   00-deps → 00-env → 01-checkout → 02-build-ghidra → 03-install-ghidra →
 #   04-install-mcp → 05-install-lx-loader → 06-install-dos-toolbox →
-#   09-install-retsync → 10-install-findcrypt →
+#   09-install-retsync → 10-install-findcrypt → 11-install-binexport →
 #   verify-extensions → 14-venv → 15-register-mcp → test
 # Every stage is idempotent and skips work that is already done.
 
@@ -58,6 +58,7 @@ GHIDRA_ZIP = ghidra_$(1)_*_64.zip
 	05-install-lx-loader install-lx-loader 06-install-dos-toolbox install-dos-toolbox \
 	verify-extensions test 14-venv venv 15-register-mcp register-mcp \
 	09-install-retsync install-retsync 10-install-findcrypt install-findcrypt \
+	11-install-binexport install-binexport \
 	install run run-bridge verify clean distclean
 
 help: ## Show this help
@@ -200,6 +201,9 @@ endef
 10-install-findcrypt: 03-install-ghidra ## Build and install GhidraFindcrypt (crypto constants)
 	$(call install_extension,GhidraFindcrypt,GhidraFindcrypt,GhidraFindcrypt/dist/ghidra_$(GHIDRA_VERSION)_*_GhidraFindcrypt.zip)
 
+11-install-binexport: 03-install-ghidra ## Build and install BinExport (exports for BinDiff)
+	$(call install_extension,BinExport,binexport,binexport/java/dist/ghidra_$(GHIDRA_VERSION)_*_BinExport.zip,,java)
+
 verify-extensions: ## Check headlessly that Ghidra loads every extension's classes
 	@[ -x "$(INSTALL_DIR)/support/analyzeHeadless" ] || { $(ERR) "Ghidra not installed; run 'make install'"; exit 1; }
 	@echo "Checking extension class discovery (headless)..."
@@ -223,6 +227,7 @@ install-lx-loader: 05-install-lx-loader
 install-dos-toolbox: 06-install-dos-toolbox
 install-retsync: 09-install-retsync
 install-findcrypt: 10-install-findcrypt
+install-binexport: 11-install-binexport
 
 # ── Stages 7–8: MCP bridge ────────────────────────────────────────────────────
 
@@ -274,7 +279,7 @@ register-mcp: 15-register-mcp
 
 PIPELINE := 00-deps 00-env 01-checkout 02-build-ghidra 03-install-ghidra 04-install-mcp \
 	05-install-lx-loader 06-install-dos-toolbox 09-install-retsync 10-install-findcrypt \
-	verify-extensions 14-venv 15-register-mcp test
+	11-install-binexport verify-extensions 14-venv 15-register-mcp test
 
 install: $(PIPELINE) ## Run the full pipeline (all stages above, in order)
 	@$(OK) "Ghidra Bundle installed. Run 'make run' to launch Ghidra."
@@ -307,7 +312,8 @@ clean: ## Remove dist/, .venv/ and all build outputs
 		lx-loader/dist lx-loader/build lx-loader/.gradle \
 		dos-toolbox/dist dos-toolbox/build dos-toolbox/.gradle \
 		ret-sync/ext_ghidra/build ret-sync/ext_ghidra/.gradle \
-		GhidraFindcrypt/dist GhidraFindcrypt/build GhidraFindcrypt/.gradle
+		GhidraFindcrypt/dist GhidraFindcrypt/build GhidraFindcrypt/.gradle \
+		binexport/java/dist binexport/java/build binexport/java/.gradle
 
 distclean: clean ## clean, then de-initialize all submodules
 	git submodule deinit -f --all

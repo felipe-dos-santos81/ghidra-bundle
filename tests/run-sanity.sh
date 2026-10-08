@@ -259,10 +259,11 @@ PACKAGE_PATTERNS=(
   "ghidra_{v}_*_dos-toolbox.zip"
   "ghidra_{v}_*_retsync.zip"
   "ghidra_{v}_*_GhidraFindcrypt.zip"
+  "ghidra_{v}_*_BinExport.zip"
 )
 # Build folders that must hold no current zip once install has moved them.
 BUILD_OUTPUTS=(ghidra/build/dist ghidra-mcp/build/distributions lx-loader/dist dos-toolbox/dist
-               ret-sync/ext_ghidra/dist GhidraFindcrypt/dist)
+               ret-sync/ext_ghidra/dist GhidraFindcrypt/dist binexport/java/dist)
 
 check_dist() {
   local version pattern dir n
@@ -291,6 +292,24 @@ check_dist() {
 }
 
 if want dist; then check_dist; fi
+
+# ── 3d. BinExport ─────────────────────────────────────────────────────────────
+check_binexport() {
+  local log="$WORK/binexport.log" out="$WORK/sample.BinExport"
+  if run_script "$log" "$SAMPLE" BinExportProbe.java "$out" && grep -q 'BINEXPORT OK' "$log"; then
+    pass "BinExport: exported sample.o ($(grep -o 'BINEXPORT OK [0-9]*' "$log" | cut -d' ' -f3) bytes)"
+  else
+    fail_with_log "BinExport: exporting sample.o failed" "$log"
+  fi
+}
+
+if want binexport; then
+  if [[ -n "$SAMPLE" ]]; then
+    check_binexport
+  else
+    fail "BinExport: not checked (needs sample.o, which clang could not build)"
+  fi
+fi
 
 # ── 4. Snapshot report (never fails the run) ──────────────────────────────────
 normalize() {  # drop decompiler warning comments and trailing whitespace

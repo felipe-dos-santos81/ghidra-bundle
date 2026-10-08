@@ -27,3 +27,8 @@
 	url = https://github.com/antoniovazquezblanco/GhidraFindcrypt.git
 	branch = main
 	shallow = true
+[submodule "binexport"]
+	path = binexport
+	url = https://github.com/google/binexport.git
+	branch = main
+	shallow = true
