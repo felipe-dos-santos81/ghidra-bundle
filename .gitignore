@@ -1,7 +1,8 @@
 # Bundle build and runtime artifacts
 dist/
 .venv/
-.rea/
+.rea/node_modules/
+.rea/rea
 
 # Operating System files
 .DS_Store

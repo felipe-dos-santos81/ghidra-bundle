@@ -87,9 +87,9 @@ Operational context, invariants and conventions for AI coding agents working in 
 
 ### 2.8 REA
 - REA is **not a Ghidra extension**: nothing is installed into `Ghidra/Extensions/`, and `install_extension`, `VerifyExtensions.java` and `dist/packages/` do not apply. It loads its own bridge script through `-scriptPath` into a throwaway read-only project.
-- `REA_VERSION` in the `Makefile` pins `rea-agents` exactly; upstream ships breaking releases often (4.0.0 to 6.3.0 in five days). Its Ghidra provider admits Linux arm64 from 6.1.0 and needs the host-native decompiler this source build provides.
-- The stage is optional: without npm and Node.js 22.19+, 24.11+ or 26+ it warns and skips, and `make test` reports SKIP for the `rea` section.
-- `$(REA_BIN)` = `.rea/rea` is a wrapper written on every run of the stage. It sets `GHIDRA_INSTALL_DIR`, `JAVA_HOME` and `REA_ANALYSIS_PROVIDER=ghidra` and calls node by absolute path, so both MCP registrations are just `.rea/rea --mcp`. Re-run `make install-rea` after changing Node or the JDK.
+- `.rea/package.json` pins `rea-agents` exactly and the committed `.rea/package-lock.json` pins every transitive package with its hash; the stage installs with `npm ci` and reinstalls when the lockfile changes (its hash is kept in `.rea/node_modules/.bundle-lock`). To bump REA, edit the version in `package.json` and run `npm install --prefix .rea --package-lock-only --ignore-scripts`. Upstream ships breaking releases often (4.0.0 to 6.3.0 in five days). Its Ghidra provider admits Linux arm64 from 6.1.0 and needs the host-native decompiler this source build provides.
+- The stage is optional: without npm and Node.js 22.19+, 24.11+ or 26+, or when `npm ci` fails (no network), it warns and carries on, deleting a `.rea/rea` that no longer runs, and `make test` reports SKIP for the `rea` section.
+- `$(REA_BIN)` = `.rea/rea` is a wrapper written on every run of the stage. It sets `GHIDRA_INSTALL_DIR`, `JAVA_HOME`, `REA_ANALYSIS_PROVIDER=ghidra` and `TMPDIR` (`portable/temp`, where REA keeps each session's project and its copy of the analyzed file) and calls node by absolute path, so both MCP registrations are just `.rea/rea --mcp`. Re-run `make install-rea` after changing Node or the JDK.
 - REA's Ghidra sessions read `launch.properties`, so they write under `portable/` (in `<user>-ghidra/` directories, next to the GUI's `ghidra/`). Never run `rea setup`: it writes skills and registrations into several agent directories under `~`.
 - REA rejects NE, LE and LX files and imports DOS MZ with Ghidra's stock `MzLoader`, so GhidraMCP with lx-loader and GhidraDosToolbox stays the path for that work.
 
@@ -116,8 +116,8 @@ Operational context, invariants and conventions for AI coding agents working in 
 | — | `verify-extensions` | Checks headlessly that every extension's key classes load |
 | `13` | `13-pyghidra` (`pyghidra`) | Sets up PyGhidra's venv in `portable/` with `bundle_mpq` |
 | `14` | `14-venv` (`venv`) | Creates `.venv` and installs `bridge-mcp-ghidra` |
-| `15` | `15-register-mcp` (`register-mcp`) | Registers `ghidra` with opencode (atomic JSON write) and Claude Code (`claude mcp add --scope user`, skipped if `claude` is absent), through the `register_mcp` macro |
-| `16` | `16-install-rea` (`install-rea`) | Installs the pinned REA into `.rea/` with npm, writes the `.rea/rea` wrapper and registers `rea` (`register_mcp`); skipped without a suitable Node.js |
+| `15` | `15-register-mcp` (`register-mcp`) | Registers `ghidra` with opencode (atomic JSON write; a config that is not plain JSON, such as JSONC, is left unchanged with a warning) and Claude Code (`claude mcp add --scope user`, skipped if `claude` is absent), through the `register_mcp` macro |
+| `16` | `16-install-rea` (`install-rea`) | Installs REA into `.rea/` from its lockfile (`npm ci`), writes the `.rea/rea` wrapper and registers `rea` (`register_mcp`); warns and skips without a suitable Node.js or when npm fails |
 | — | `test` | Sanity suite (`tests/run-sanity.sh`), in sections: `extensions`, `fixtures` (ELF/DOS/LE via `SanityCheck.java`), `mcp` (GhidraMCP over HTTP on `TEST_MCP_PORT`, 18089), `dist`, `binexport`, `portable`, `jython`, `pyghidra`, `rea`. `SANITY_ONLY=dist,pyghidra make test` runs a subset |
 
 Runtime and maintenance: `install` (runs `$(PIPELINE)`, all of the above, with `verify-extensions` after stage 12 so a broken extension stops the install before MCP registration, ending with `test`), `run`, `run-bridge`, `verify` (probes `http://127.0.0.1:8089/check_connection`), `clean`, `distclean`.

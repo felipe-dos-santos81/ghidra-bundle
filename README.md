@@ -70,13 +70,13 @@ Run `make help` for the same list.
 | `13-pyghidra` (`pyghidra`) | Set up PyGhidra's venv (in `portable/`) with `bundle_mpq` |
 | `14-venv` (`venv`) | Create `.venv` with `bridge-mcp-ghidra` |
 | `15-register-mcp` (`register-mcp`) | Register the MCP server with opencode and Claude Code |
-| `16-install-rea` (`install-rea`) | Install REA into `.rea/` and register its MCP server (skipped without Node.js) |
+| `16-install-rea` (`install-rea`) | Install REA into `.rea/` and register its MCP server (skipped without Node.js or when npm fails) |
 | `test` | Run the sanity test suite (see Testing) |
 | `install` | Run all of the above, in order (ends with `test`) |
 | `run` | Launch Ghidra (fails if port 8089 is in use) |
 | `run-bridge` | Run the MCP bridge over stdio |
 | `verify` | Check the GhidraMCP plugin answers on port 8089 |
-| `clean` | Remove `dist/`, `.venv/`, `.rea/` and build outputs |
+| `clean` | Remove `dist/`, `.venv/`, REA's install in `.rea/` and build outputs |
 | `distclean` | `clean`, then de-initialize the submodules |
 
 ## Testing
@@ -128,7 +128,7 @@ ghidra-bundle/
 ├── binexport/            # Submodule: BinExport (Ghidra extension in java/)
 ├── D2GridraTools/        # Submodule: Diablo 2 scripts (unlicensed; fetched only)
 ├── .venv/                # Python venv with bridge-mcp-ghidra (git-ignored)
-├── .rea/                 # REA (npm) and its rea wrapper (git-ignored; only with Node.js)
+├── .rea/                 # REA's version pin and lockfile; node_modules/ and the rea wrapper are git-ignored
 └── dist/                 # Built Ghidra (git-ignored)
     ├── packages/            # Every built zip: Ghidra and each extension
     └── ghidra_12.1.4_PUBLIC/

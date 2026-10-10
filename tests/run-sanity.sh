@@ -50,6 +50,10 @@ count_matches() {
   echo "${#matches[@]}"
 }
 
+# canon <path>: <path> with symlinks resolved, like $INSTALL_DIR, so the two compare when the
+# configured install path goes through a symlink. The path need not exist.
+canon() { python3 -I -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$1"; }
+
 [[ -x "$HEADLESS" ]] || die "$HEADLESS not found; run 'make install' first."
 for tool in clang python3 curl; do
   command -v "$tool" >/dev/null || die "$tool not found on PATH (run 'make deps')."
@@ -339,7 +343,7 @@ fi
 check_pyghidra_settings() {
   local settings
   settings=$(python3 -I "$REPO_DIR/scripts/pyghidra-venv-dir.py" "$INSTALL_DIR" --settings 2>&1) || true
-  if [[ "$settings" == "$INSTALL_DIR/portable/settings/"* ]]; then
+  if [[ "$(canon "$settings")" == "$INSTALL_DIR/portable/settings/"* ]]; then
     pass "portable: pyghidraRun keeps its settings and venv under portable/settings"
   else
     fail "portable: pyghidraRun would keep its settings in '$settings'"
@@ -359,8 +363,12 @@ check_portable_paths() {  # check_portable_paths [extension dir...]: run Portabl
   while IFS= read -r line; do
     line=${line% }
     case "$line" in
-      "PORTABLE OK "*"$INSTALL_DIR/portable/settings/"*) pass "portable: ${line#PORTABLE OK }" ;;
-      "PORTABLE OK "*) fail "portable: ${line#PORTABLE OK } is not under portable/settings" ;;
+      "PORTABLE OK "*)  # "PORTABLE OK <what>: <path>"
+        if [[ "$(canon "${line##*: }")" == "$INSTALL_DIR/portable/settings/"* ]]; then
+          pass "portable: ${line#PORTABLE OK }"
+        else
+          fail "portable: ${line#PORTABLE OK } is not under portable/settings"
+        fi ;;
       *) fail "portable: ${line#PORTABLE }" ;;
     esac
   done < <(grep -o 'PORTABLE [A-Z]* [^(]*' "$log")
@@ -466,13 +474,14 @@ check_rea() {
     skip "REA: $REA_BIN not found (optional, needs Node.js; run 'make install-rea')"
     return
   fi
-  # An empty HOME shows any write REA makes there; TMPDIR keeps its Ghidra project in $WORK.
-  mkdir -p "$home" "$WORK/rea-tmp"
-  local rea=(env HOME="$home" TMPDIR="$WORK/rea-tmp"
+  # An empty HOME shows any write REA makes there. The TMPDIR does not exist: the wrapper
+  # must replace it with portable/temp, where REA keeps its session project.
+  mkdir -p "$home"
+  local rea=(env HOME="$home" TMPDIR="$WORK/no-such-tmp"
              "$TIMEOUT" --foreground "${TEST_IMPORT_TIMEOUT:-600}" "$REA_BIN")
   # The wrapper sets GHIDRA_INSTALL_DIR itself, so check which Ghidra doctor validated.
   if "${rea[@]}" doctor --provider ghidra --json > "$out" 2>&1 \
-      && grep -qF "\"$INSTALL_DIR/support/analyzeHeadless\"" "$out"; then
+      && [[ "$(sed -n 's/.*"\(.*\/support\/analyzeHeadless\)".*/\1/p' "$out" | head -n 1)" -ef "$HEADLESS" ]]; then
     pass "REA: doctor accepts this install's Ghidra and JDK"
   else
     fail_with_log "REA: doctor does not accept this install's Ghidra and JDK" "$out"

@@ -6,7 +6,8 @@
 #   07-install-ghidrassist → 08-install-reveng →
 #   09-install-retsync → 10-install-findcrypt → 11-install-binexport →
 #   12-install-scripts →
-#   verify-extensions → 13-pyghidra → 14-venv → 15-register-mcp → test
+#   verify-extensions → 13-pyghidra → 14-venv → 15-register-mcp →
+#   16-install-rea → test
 # Every stage is idempotent and skips work that is already done.
 
 .NOTPARALLEL:
@@ -30,11 +31,11 @@ VENV_DIR := $(BUNDLE_DIR)/.venv
 BRIDGE_BIN := $(VENV_DIR)/bin/bridge-mcp-ghidra
 OPENCODE_CONFIG := $(HOME)/.config/opencode/opencode.json
 BUNDLE_MPQ_SRC := python/bundle-mpq
-# REA (npm package rea-agents) is pinned exactly: upstream ships breaking releases often.
-REA_VERSION := 6.3.0
+# REA (npm package rea-agents) is pinned by .rea/package.json and its lockfile.
 REA_DIR := $(BUNDLE_DIR)/.rea
 REA_BIN := $(REA_DIR)/rea
-# True when npm is on PATH and node is in rea-agents' "engines" range.
+# True when npm is on PATH and node is in rea-agents' "engines" range (REA_NODE_WANT in words).
+REA_NODE_WANT := Node.js 22.19+, 24.11+ or 26+ with npm
 REA_NODE_CHECK = command -v npm >/dev/null 2>&1 && node -e 'const [a, b] = process.versions.node.split("."); \
 	process.exit((a == 22 && b >= 19) || (a == 24 && b >= 11) || a >= 26 ? 0 : 1)'
 # Succeeds when bundle_mpq can load StormLib (same search as at run time, Homebrew paths included).
@@ -59,8 +60,9 @@ endif
 export JAVA_HOME := $(JAVA21_HOME)
 export PATH := $(JAVA21_HOME)/bin:$(HOME)/.local/bin:$(HOME)/.cargo/bin:$(PATH)
 
-# Message helpers: $(OK) "text", $(WARN) "text", $(ERR) "text"
+# Message helpers: $(OK) "text", $(WARN) "text", $(ERR) "text", $(TICK) "label" "detail"
 OK = printf '\033[32m%s\033[0m\n'
+TICK = printf '\033[32m✔ %-7s\033[0m %s\n'
 WARN = printf '\033[33m%s\033[0m\n'
 ERR = printf '\033[31mERROR: %s\033[0m\n'
 comma := ,
@@ -112,11 +114,11 @@ help: ## Show this help
 
 # $(call check_tool,command,label,version command)
 check_tool = command -v $(1) >/dev/null 2>&1 || { $(ERR) "$(2) not found on PATH (run 'make deps')"; exit 1; }; \
-	printf '\033[32m✔ %-7s\033[0m %s\n' "$(2)" "$$($(3) 2>&1 | head -n 1)"
+	$(TICK) "$(2)" "$$($(3) 2>&1 | head -n 1)"
 
 00-env: ## Check host prerequisites (JDK 21, Maven, Clang, Python 3, uv, Git, curl, GNU timeout; StormLib and Node.js optional)
 	@[ -d "$(JAVA21_HOME)" ] || { $(ERR) "JDK 21 not found (run 'make deps')"; exit 1; }
-	@printf '\033[32m✔ %-7s\033[0m %s\n' "JDK 21" "$(JAVA21_HOME)"
+	@$(TICK) "JDK 21" "$(JAVA21_HOME)"
 	@$(call check_tool,mvn,Maven,mvn -version)
 	@$(call check_tool,clang,Clang,clang --version)
 	@$(call check_tool,python3,Python,python3 --version)
@@ -125,14 +127,14 @@ check_tool = command -v $(1) >/dev/null 2>&1 || { $(ERR) "$(2) not found on PATH
 	@$(call check_tool,curl,curl,curl --version)
 	@$(call check_tool,$(TIMEOUT_CMD),timeout,$(TIMEOUT_CMD) --version)
 	@if $(STORMLIB_CHECK) 2>/dev/null; then \
-		printf '\033[32m✔ %-7s\033[0m %s\n' "StormLib" "found (MPQ support)"; \
+		$(TICK) "StormLib" "found (MPQ support)"; \
 	else \
 		$(WARN) "StormLib not found: optional, needed to open MPQ archives (run 'make deps')"; \
 	fi
 	@if $(REA_NODE_CHECK) 2>/dev/null; then \
-		printf '\033[32m✔ %-7s\033[0m %s\n' "Node.js" "$$(node --version) (REA)"; \
+		$(TICK) "Node.js" "$$(node --version) (REA)"; \
 	else \
-		$(WARN) "Node.js 22.19+, 24.11+ or 26+ with npm not found: optional, needed for REA"; \
+		$(WARN) "$(REA_NODE_WANT) not found: optional, needed for REA"; \
 	fi
 	@$(OK) "Environment check passed."
 
@@ -328,17 +330,23 @@ pyghidra: 13-pyghidra
 	fi
 
 # Adds/updates the MCP_NAME entry (command: the JSON array MCP_COMMAND) in the opencode
-# config (atomic write).
+# config (atomic write). A config that is not plain JSON (opencode also reads JSONC) is
+# left alone with a warning: rewriting it would drop everything else in the file.
 define REGISTER_OPENCODE
-import json, os
+import json, os, sys
 path = "$(OPENCODE_CONFIG)"
 name = os.environ["MCP_NAME"]
 entry = {"type": "local", "command": json.loads(os.environ["MCP_COMMAND"]), "enabled": True}
 try:
     with open(path, encoding="utf-8") as f:
-        data = json.load(f)
-except (OSError, ValueError):
-    data = {"$$schema": "https://opencode.ai/config.json"}
+        text = f.read()
+except FileNotFoundError:
+    text = ""
+try:
+    data = json.loads(text) if text.strip() else {"$$schema": "https://opencode.ai/config.json"}
+except ValueError as e:
+    print("opencode: WARNING: " + path + " is not plain JSON (" + str(e) + "); left unchanged. Add under mcp." + name + ": " + json.dumps(entry), file=sys.stderr)
+    sys.exit(0)
 if data.get("mcp", {}).get(name) == entry:
     print("opencode: " + name + " MCP server already registered")
 else:
@@ -351,12 +359,14 @@ endef
 export REGISTER_OPENCODE
 
 # $(call register_mcp,name,executable[,arguments]): register it with opencode and Claude Code.
+# The Claude Code check reads `claude mcp get`; if that output changes shape it re-registers.
 define register_mcp
 	mkdir -p "$(dir $(OPENCODE_CONFIG))"; \
 	MCP_NAME=$(1) MCP_COMMAND='["$(2)"$(foreach a,$(3),$(comma) "$(a)")]' python3 -c "$$REGISTER_OPENCODE" || exit 1; \
 	if ! command -v claude >/dev/null 2>&1; then \
 		$(WARN) "claude CLI not found, skipping Claude Code registration."; \
-	elif claude mcp get $(1) 2>/dev/null | grep -qF "$(2)"; then \
+	elif GOT=$$(claude mcp get $(1) 2>/dev/null) && grep -qF "Command: $(2)" <<< "$$GOT" && \
+		[ "$$(sed -n 's/^ *Args: *//p' <<< "$$GOT" | sed 's/ *$$//')" = "$(strip $(3))" ]; then \
 		echo "Claude Code: $(1) MCP server already registered"; \
 	else \
 		claude mcp remove $(1) --scope user >/dev/null 2>&1; \
@@ -374,22 +384,26 @@ register-mcp: 15-register-mcp
 
 # REA is not a Ghidra extension: it runs this Ghidra headlessly through its own bridge
 # script. $(REA_BIN) is a wrapper that binds it to this install's Ghidra and JDK, with
-# node's absolute path so MCP clients need no node on their PATH.
+# node's absolute path so MCP clients need no node on their PATH, and keeps REA's session
+# files in portable/temp. The stage is optional: when Node.js is unsuitable or npm fails it
+# warns, drops a wrapper that no longer runs (so `make test` skips too) and carries on.
 16-install-rea: 03-install-ghidra ## Install REA into .rea/ and register the "rea" MCP server (optional: skipped without Node.js)
-	@if ! { $(REA_NODE_CHECK); } 2>/dev/null; then \
-		$(WARN) "Node.js 22.19+, 24.11+ or 26+ with npm not found: skipping REA (optional)."; \
-		exit 0; \
-	fi; \
-	if [ "$$("$(REA_BIN)" --version 2>/dev/null)" = "$(REA_VERSION)" ]; then \
-		echo "REA $(REA_VERSION) already installed in $(REA_DIR), skipping."; \
+	@skip() { $(WARN) "$$1: skipping REA (optional)."; \
+		"$(REA_BIN)" --version >/dev/null 2>&1 || rm -f "$(REA_BIN)"; exit 0; }; \
+	{ $(REA_NODE_CHECK); } 2>/dev/null || skip "$(REA_NODE_WANT) not found"; \
+	LOCK=$$(git hash-object "$(REA_DIR)/package-lock.json") || exit 1; \
+	if [ "$$(cat "$(REA_DIR)/node_modules/.bundle-lock" 2>/dev/null)" = "$$LOCK" ]; then \
+		echo "REA already installed in $(REA_DIR), skipping."; \
 	else \
-		npm install --prefix "$(REA_DIR)" --ignore-scripts --no-audit --no-fund --loglevel=error \
-			"rea-agents@$(REA_VERSION)" || exit 1; \
-		$(OK) "REA $(REA_VERSION) installed in $(REA_DIR)."; \
+		npm ci --prefix "$(REA_DIR)" --ignore-scripts --no-audit --no-fund --loglevel=error \
+			|| skip "npm could not install REA"; \
+		echo "$$LOCK" > "$(REA_DIR)/node_modules/.bundle-lock"; \
+		$(OK) "REA installed in $(REA_DIR)."; \
 	fi; \
 	NODE=$$(node -p process.execPath) || exit 1; \
 	printf '%s\n' '#!/bin/sh' "# Written by 'make install-rea'." \
 		'export GHIDRA_INSTALL_DIR="$(INSTALL_DIR)" JAVA_HOME="$(JAVA21_HOME)" REA_ANALYSIS_PROVIDER=ghidra' \
+		'export TMPDIR="$(PORTABLE_DIR)/temp"' \
 		"exec \"$$NODE\" \"$(REA_DIR)/node_modules/.bin/rea\" \"\$$@\"" > "$(REA_BIN)" \
 		&& chmod +x "$(REA_BIN)" || exit 1; \
 	$(call register_mcp,rea,$(REA_BIN),--mcp)
@@ -429,8 +443,8 @@ verify: ## Check that the GhidraMCP plugin answers on port 8089
 
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 
-clean: ## Remove dist/, .venv/, .rea/ and all build outputs
-	rm -rf "$(DIST_DIR)" "$(VENV_DIR)" "$(REA_DIR)" ghidra/build ghidra-mcp/target ghidra-mcp/build \
+clean: ## Remove dist/, .venv/, REA's install in .rea/ and all build outputs
+	rm -rf "$(DIST_DIR)" "$(VENV_DIR)" "$(REA_DIR)/node_modules" "$(REA_BIN)" ghidra/build ghidra-mcp/target ghidra-mcp/build \
 		lx-loader/dist lx-loader/build lx-loader/.gradle \
 		dos-toolbox/dist dos-toolbox/build dos-toolbox/.gradle \
 		ret-sync/ext_ghidra/build ret-sync/ext_ghidra/.gradle \

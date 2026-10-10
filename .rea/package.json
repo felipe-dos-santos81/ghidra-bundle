@@ -1,0 +1,7 @@
+{
+  "name": "ghidra-bundle-rea",
+  "private": true,
+  "dependencies": {
+    "rea-agents": "6.3.0"
+  }
+}
