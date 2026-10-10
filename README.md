@@ -44,7 +44,7 @@ When Node.js is available, `make install` also installs [REA](https://github.com
 .rea/rea function /path/to/program.exe entry --json   # the same wrapper the MCP server uses
 ```
 
-The wrapper `.rea/rea` points REA at this bundle's Ghidra and JDK; re-run `make install-rea` after changing Node.js or the JDK. REA's sessions are read-only and deleted on close, and it rejects LE/LX files, so use the `ghidra` server for persistent projects and for DOS/4GW or OS/2 programs. REA adds about 150 tools to each client session.
+The wrapper `.rea/rea` points REA at this bundle's Ghidra and JDK; re-run `make install-rea` after changing Node.js or the JDK. REA's sessions are read-only and deleted on close, and it cannot analyze LE/LX programs, so use the `ghidra` server for persistent projects and for DOS/4GW or OS/2 programs. Take care with DOS/4GW games: REA does not reject them, it treats them as plain DOS MZ and shows only the 16-bit extender stub. REA adds about 150 tools to each client session.
 
 ## Make targets
 
