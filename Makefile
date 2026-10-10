@@ -30,6 +30,13 @@ VENV_DIR := $(BUNDLE_DIR)/.venv
 BRIDGE_BIN := $(VENV_DIR)/bin/bridge-mcp-ghidra
 OPENCODE_CONFIG := $(HOME)/.config/opencode/opencode.json
 BUNDLE_MPQ_SRC := python/bundle-mpq
+# REA (npm package rea-agents) is pinned exactly: upstream ships breaking releases often.
+REA_VERSION := 6.3.0
+REA_DIR := $(BUNDLE_DIR)/.rea
+REA_BIN := $(REA_DIR)/rea
+# True when npm is on PATH and node is in rea-agents' "engines" range.
+REA_NODE_CHECK = command -v npm >/dev/null 2>&1 && node -e 'const [a, b] = process.versions.node.split("."); \
+	process.exit((a == 22 && b >= 19) || (a == 24 && b >= 11) || a >= 26 ? 0 : 1)'
 # Succeeds when bundle_mpq can load StormLib (same search as at run time, Homebrew paths included).
 STORMLIB_CHECK = python3 -I -c 'import sys; sys.path.insert(0, "$(BUNDLE_DIR)/$(BUNDLE_MPQ_SRC)"); \
 	from bundle_mpq import load_stormlib; load_stormlib()'
@@ -56,6 +63,7 @@ export PATH := $(JAVA21_HOME)/bin:$(HOME)/.local/bin:$(HOME)/.cargo/bin:$(PATH)
 OK = printf '\033[32m%s\033[0m\n'
 WARN = printf '\033[33m%s\033[0m\n'
 ERR = printf '\033[31mERROR: %s\033[0m\n'
+comma := ,
 
 # Ghidra's own zip name ends in its platform (linux_arm_64, mac_x86_64, ...). Extension
 # zips also start with ghidra_<version>_, so match on "_64.zip" to tell them apart.
@@ -67,7 +75,7 @@ GHIDRA_ZIP = ghidra_$(1)_*_64.zip
 	verify-extensions test 14-venv venv 15-register-mcp register-mcp \
 	07-install-ghidrassist install-ghidrassist 08-install-reveng install-reveng 09-install-retsync install-retsync 10-install-findcrypt install-findcrypt \
 	11-install-binexport install-binexport 12-install-scripts install-scripts \
-	13-pyghidra pyghidra \
+	13-pyghidra pyghidra 16-install-rea install-rea \
 	install run run-bridge verify clean distclean
 
 help: ## Show this help
@@ -106,7 +114,7 @@ help: ## Show this help
 check_tool = command -v $(1) >/dev/null 2>&1 || { $(ERR) "$(2) not found on PATH (run 'make deps')"; exit 1; }; \
 	printf '\033[32m✔ %-7s\033[0m %s\n' "$(2)" "$$($(3) 2>&1 | head -n 1)"
 
-00-env: ## Check host prerequisites (JDK 21, Maven, Clang, Python 3, uv, Git, curl, GNU timeout; StormLib optional)
+00-env: ## Check host prerequisites (JDK 21, Maven, Clang, Python 3, uv, Git, curl, GNU timeout; StormLib and Node.js optional)
 	@[ -d "$(JAVA21_HOME)" ] || { $(ERR) "JDK 21 not found (run 'make deps')"; exit 1; }
 	@printf '\033[32m✔ %-7s\033[0m %s\n' "JDK 21" "$(JAVA21_HOME)"
 	@$(call check_tool,mvn,Maven,mvn -version)
@@ -120,6 +128,11 @@ check_tool = command -v $(1) >/dev/null 2>&1 || { $(ERR) "$(2) not found on PATH
 		printf '\033[32m✔ %-7s\033[0m %s\n' "StormLib" "found (MPQ support)"; \
 	else \
 		$(WARN) "StormLib not found: optional, needed to open MPQ archives (run 'make deps')"; \
+	fi
+	@if $(REA_NODE_CHECK) 2>/dev/null; then \
+		printf '\033[32m✔ %-7s\033[0m %s\n' "Node.js" "$$(node --version) (REA)"; \
+	else \
+		$(WARN) "Node.js 22.19+, 24.11+ or 26+ with npm not found: optional, needed for REA"; \
 	fi
 	@$(OK) "Environment check passed."
 
@@ -314,54 +327,88 @@ pyghidra: 13-pyghidra
 		$(OK) "bridge-mcp-ghidra installed in $(VENV_DIR)."; \
 	fi
 
-# Adds/updates the "ghidra" entry in the opencode config (atomic write).
+# Adds/updates the MCP_NAME entry (command: the JSON array MCP_COMMAND) in the opencode
+# config (atomic write).
 define REGISTER_OPENCODE
 import json, os
 path = "$(OPENCODE_CONFIG)"
-entry = {"type": "local", "command": ["$(BRIDGE_BIN)"], "enabled": True}
+name = os.environ["MCP_NAME"]
+entry = {"type": "local", "command": json.loads(os.environ["MCP_COMMAND"]), "enabled": True}
 try:
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
 except (OSError, ValueError):
     data = {"$$schema": "https://opencode.ai/config.json"}
-if data.get("mcp", {}).get("ghidra") == entry:
-    print("opencode: ghidra MCP server already registered")
+if data.get("mcp", {}).get(name) == entry:
+    print("opencode: " + name + " MCP server already registered")
 else:
-    data.setdefault("mcp", {})["ghidra"] = entry
+    data.setdefault("mcp", {})[name] = entry
     with open(path + ".tmp", "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
     os.replace(path + ".tmp", path)
-    print("opencode: registered ghidra MCP server in " + path)
+    print("opencode: registered " + name + " MCP server in " + path)
 endef
 export REGISTER_OPENCODE
 
-15-register-mcp: 14-venv ## Register the "ghidra" MCP server with opencode and Claude Code
-	@mkdir -p "$(dir $(OPENCODE_CONFIG))"
-	@python3 -c "$$REGISTER_OPENCODE"
-	@if ! command -v claude >/dev/null 2>&1; then \
+# $(call register_mcp,name,executable[,arguments]): register it with opencode and Claude Code.
+define register_mcp
+	mkdir -p "$(dir $(OPENCODE_CONFIG))"; \
+	MCP_NAME=$(1) MCP_COMMAND='["$(2)"$(foreach a,$(3),$(comma) "$(a)")]' python3 -c "$$REGISTER_OPENCODE" || exit 1; \
+	if ! command -v claude >/dev/null 2>&1; then \
 		$(WARN) "claude CLI not found, skipping Claude Code registration."; \
-	elif claude mcp get ghidra 2>/dev/null | grep -qF "$(BRIDGE_BIN)"; then \
-		echo "Claude Code: ghidra MCP server already registered"; \
+	elif claude mcp get $(1) 2>/dev/null | grep -qF "$(2)"; then \
+		echo "Claude Code: $(1) MCP server already registered"; \
 	else \
-		claude mcp remove ghidra --scope user >/dev/null 2>&1; \
-		claude mcp add --scope user ghidra -- "$(BRIDGE_BIN)" || exit 1; \
+		claude mcp remove $(1) --scope user >/dev/null 2>&1; \
+		claude mcp add --scope user $(1) -- "$(2)" $(3) || exit 1; \
 	fi
+endef
+
+15-register-mcp: 14-venv ## Register the "ghidra" MCP server with opencode and Claude Code
+	@$(call register_mcp,ghidra,$(BRIDGE_BIN))
 
 venv: 14-venv
 register-mcp: 15-register-mcp
+
+# ── Stage 16: REA ─────────────────────────────────────────────────────────────
+
+# REA is not a Ghidra extension: it runs this Ghidra headlessly through its own bridge
+# script. $(REA_BIN) is a wrapper that binds it to this install's Ghidra and JDK, with
+# node's absolute path so MCP clients need no node on their PATH.
+16-install-rea: 03-install-ghidra ## Install REA into .rea/ and register the "rea" MCP server (optional: skipped without Node.js)
+	@if ! { $(REA_NODE_CHECK); } 2>/dev/null; then \
+		$(WARN) "Node.js 22.19+, 24.11+ or 26+ with npm not found: skipping REA (optional)."; \
+		exit 0; \
+	fi; \
+	if [ "$$("$(REA_BIN)" --version 2>/dev/null)" = "$(REA_VERSION)" ]; then \
+		echo "REA $(REA_VERSION) already installed in $(REA_DIR), skipping."; \
+	else \
+		npm install --prefix "$(REA_DIR)" --ignore-scripts --no-audit --no-fund --loglevel=error \
+			"rea-agents@$(REA_VERSION)" || exit 1; \
+		$(OK) "REA $(REA_VERSION) installed in $(REA_DIR)."; \
+	fi; \
+	NODE=$$(node -p process.execPath) || exit 1; \
+	printf '%s\n' '#!/bin/sh' "# Written by 'make install-rea'." \
+		'export GHIDRA_INSTALL_DIR="$(INSTALL_DIR)" JAVA_HOME="$(JAVA21_HOME)" REA_ANALYSIS_PROVIDER=ghidra' \
+		"exec \"$$NODE\" \"$(REA_DIR)/node_modules/.bin/rea\" \"\$$@\"" > "$(REA_BIN)" \
+		&& chmod +x "$(REA_BIN)" || exit 1; \
+	$(call register_mcp,rea,$(REA_BIN),--mcp)
+
+install-rea: 16-install-rea
 
 # ── Pipeline & runtime ────────────────────────────────────────────────────────
 
 PIPELINE := 00-deps 00-env 01-checkout 02-build-ghidra 03-install-ghidra 04-install-mcp \
 	05-install-lx-loader 06-install-dos-toolbox 07-install-ghidrassist 08-install-reveng 09-install-retsync 10-install-findcrypt \
-	11-install-binexport 12-install-scripts verify-extensions 13-pyghidra 14-venv 15-register-mcp test
+	11-install-binexport 12-install-scripts verify-extensions 13-pyghidra 14-venv 15-register-mcp \
+	16-install-rea test
 
 install: $(PIPELINE) ## Run the full pipeline (all stages above, in order)
 	@$(OK) "Ghidra Bundle installed. Run 'make run' to launch Ghidra."
 
-test: ## Run the sanity test suite (fixtures, extensions, GhidraMCP, dist, BinExport, Jython, PyGhidra, portable mode)
+test: ## Run the sanity test suite (fixtures, extensions, GhidraMCP, dist, BinExport, Jython, PyGhidra, REA, portable mode)
 	@[ -d "$(JAVA21_HOME)" ] || { $(ERR) "JDK 21 not found (run 'make deps')"; exit 1; }
-	@PACKAGES_DIR="$(PACKAGES_DIR)" tests/run-sanity.sh "$(INSTALL_DIR)" "$(JAVA21_HOME)"
+	@PACKAGES_DIR="$(PACKAGES_DIR)" REA_BIN="$(REA_BIN)" tests/run-sanity.sh "$(INSTALL_DIR)" "$(JAVA21_HOME)"
 
 run: ## Launch Ghidra (fails if port 8089 is already in use)
 	@[ -x "$(INSTALL_DIR)/ghidraRun" ] || { $(ERR) "Ghidra not installed; run 'make install'"; exit 1; }
@@ -382,8 +429,8 @@ verify: ## Check that the GhidraMCP plugin answers on port 8089
 
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 
-clean: ## Remove dist/, .venv/ and all build outputs
-	rm -rf "$(DIST_DIR)" "$(VENV_DIR)" ghidra/build ghidra-mcp/target ghidra-mcp/build \
+clean: ## Remove dist/, .venv/, .rea/ and all build outputs
+	rm -rf "$(DIST_DIR)" "$(VENV_DIR)" "$(REA_DIR)" ghidra/build ghidra-mcp/target ghidra-mcp/build \
 		lx-loader/dist lx-loader/build lx-loader/.gradle \
 		dos-toolbox/dist dos-toolbox/build dos-toolbox/.gradle \
 		ret-sync/ext_ghidra/build ret-sync/ext_ghidra/.gradle \

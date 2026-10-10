@@ -7,8 +7,9 @@
 #        TEST_MCP_PORT=18089  port for the GhidraMCP test server (default 18089)
 #        TEST_IMPORT_TIMEOUT=600  seconds before a fixture import is killed (default 600)
 #        SANITY_ONLY=dist,jython  run only these sections: extensions, fixtures, mcp,
-#                                 dist, binexport, portable, jython, pyghidra
+#                                 dist, binexport, portable, jython, pyghidra, rea
 #        PACKAGES_DIR=<dir>       built zips to check (default: <install dir>/../packages)
+#        REA_BIN=<file>           REA wrapper written by `make install-rea` (default: <repo>/.rea/rea)
 # Needs GNU timeout (Linux: coreutils; macOS: `brew install coreutils` for gtimeout).
 set -euo pipefail
 
@@ -32,7 +33,7 @@ indent() { sed 's/^/    /'; }
 fail_with_log() { fail "$1"; tail -20 "$2" | indent; }  # fail_with_log <message> <log file>
 
 # want <section>: true when SANITY_ONLY is unset or lists <section> (comma-separated).
-SECTIONS=",extensions,fixtures,mcp,dist,binexport,portable,jython,pyghidra,"
+SECTIONS=",extensions,fixtures,mcp,dist,binexport,portable,jython,pyghidra,rea,"
 want() { [[ -z "${SANITY_ONLY:-}" || ",$SANITY_ONLY," == *",$1,"* ]]; }
 SANITY_ONLY=${SANITY_ONLY:-}
 for section in ${SANITY_ONLY//,/ }; do
@@ -68,6 +69,7 @@ done
 
 MCP_PORT="${TEST_MCP_PORT:-18089}"
 PACKAGES_DIR="${PACKAGES_DIR:-$(dirname "$INSTALL_DIR")/packages}"
+REA_BIN="${REA_BIN:-$REPO_DIR/.rea/rea}"
 WORK=$(mktemp -d "$INSTALL_DIR/portable/temp/sanity-XXXXXX")
 # pkill -f takes an extended regex; escape the path so characters like [ ( + in it match literally.
 WORK_RE=$(printf '%s' "$WORK" | sed 's/[][\\.*^$+?(){}|]/\\&/g')
@@ -456,6 +458,40 @@ check_pyghidra() {
 }
 
 if want pyghidra; then check_pyghidra; fi
+
+# ── 3h. REA ───────────────────────────────────────────────────────────────────
+check_rea() {
+  local out="$WORK/rea.json" home="$WORK/rea-home"
+  if [[ ! -x "$REA_BIN" ]]; then
+    skip "REA: $REA_BIN not found (optional, needs Node.js; run 'make install-rea')"
+    return
+  fi
+  # An empty HOME shows any write REA makes there; TMPDIR keeps its Ghidra project in $WORK.
+  mkdir -p "$home" "$WORK/rea-tmp"
+  local rea=(env HOME="$home" TMPDIR="$WORK/rea-tmp"
+             "$TIMEOUT" --foreground "${TEST_IMPORT_TIMEOUT:-600}" "$REA_BIN")
+  # The wrapper sets GHIDRA_INSTALL_DIR itself, so check which Ghidra doctor validated.
+  if "${rea[@]}" doctor --provider ghidra --json > "$out" 2>&1 \
+      && grep -qF "\"$INSTALL_DIR/support/analyzeHeadless\"" "$out"; then
+    pass "REA: doctor accepts this install's Ghidra and JDK"
+  else
+    fail_with_log "REA: doctor does not accept this install's Ghidra and JDK" "$out"
+    return
+  fi
+  if "${rea[@]}" function "$WORK/fixtures/dos.exe" entry --provider ghidra --json > "$out" 2>&1 \
+      && grep -q '"pseudocode": "..' "$out"; then
+    pass "REA: decompiles the DOS MZ fixture through Ghidra"
+  else
+    fail_with_log "REA: could not decompile the DOS MZ fixture" "$out"
+  fi
+  if [[ -z "$(ls -A "$home")" ]]; then
+    pass "REA: wrote nothing to its home directory"
+  else
+    fail "REA: wrote to its home directory: $(ls -A "$home" | tr '\n' ' ')"
+  fi
+}
+
+if want rea; then check_rea; fi
 
 if want portable; then check_leaks; fi
 

@@ -18,6 +18,7 @@ Operational context, invariants and conventions for AI coding agents working in 
 - **BinExport**: exporter for BinDiff.
 - **D2GridraTools** + **Jython**: Diablo 2 1.14d scripts, run under Ghidra's optional Jython extension.
 - **PyGhidra + `bundle_mpq`**: PyGhidra's venv in `portable/`, with a ctypes StormLib MPQ reader (`python/bundle-mpq`).
+- **REA** (`rea-agents` 6.3.0, optional): CLI and MCP server (`rea`) that analyzes files through this Ghidra headlessly, installed in `.rea/`. Needs Node.js.
 
 ---
 
@@ -84,6 +85,14 @@ Operational context, invariants and conventions for AI coding agents working in 
 - `13-pyghidra` creates the venv where `pyghidraRun` looks for it (`scripts/pyghidra-venv-dir.py` asks Ghidra's `pyghidra_launcher`), installs Ghidra's bundled `pyghidra` wheels offline, and installs `python/bundle-mpq` (rebuilt when its source hash changes).
 - StormLib (`libstorm-dev`) is optional: without it the stage warns and `make test` reports SKIP for MPQ checks.
 
+### 2.8 REA
+- REA is **not a Ghidra extension**: nothing is installed into `Ghidra/Extensions/`, and `install_extension`, `VerifyExtensions.java` and `dist/packages/` do not apply. It loads its own bridge script through `-scriptPath` into a throwaway read-only project.
+- `REA_VERSION` in the `Makefile` pins `rea-agents` exactly; upstream ships breaking releases often (4.0.0 to 6.3.0 in five days). Its Ghidra provider admits Linux arm64 from 6.1.0 and needs the host-native decompiler this source build provides.
+- The stage is optional: without npm and Node.js 22.19+, 24.11+ or 26+ it warns and skips, and `make test` reports SKIP for the `rea` section.
+- `$(REA_BIN)` = `.rea/rea` is a wrapper written on every run of the stage. It sets `GHIDRA_INSTALL_DIR`, `JAVA_HOME` and `REA_ANALYSIS_PROVIDER=ghidra` and calls node by absolute path, so both MCP registrations are just `.rea/rea --mcp`. Re-run `make install-rea` after changing Node or the JDK.
+- REA's Ghidra sessions read `launch.properties`, so they write under `portable/` (in `<user>-ghidra/` directories, next to the GUI's `ghidra/`). Never run `rea setup`: it writes skills and registrations into several agent directories under `~`.
+- REA rejects NE, LE and LX files and imports DOS MZ with Ghidra's stock `MzLoader`, so GhidraMCP with lx-loader and GhidraDosToolbox stays the path for that work.
+
 ---
 
 ## 3. Makefile Pipeline
@@ -91,7 +100,7 @@ Operational context, invariants and conventions for AI coding agents working in 
 | Stage | Target (alias) | Description |
 | :--- | :--- | :--- |
 | `00` | `00-deps` (`deps`) | Installs missing OS packages (`apt`/`brew`) and `uv` |
-| `00` | `00-env` (`env`) | Checks JDK 21, Maven, Clang, Python 3, uv, Git, curl, GNU `timeout` (`gtimeout` on macOS) |
+| `00` | `00-env` (`env`) | Checks JDK 21, Maven, Clang, Python 3, uv, Git, curl, GNU `timeout` (`gtimeout` on macOS); warns when the optional StormLib or Node.js is missing |
 | `01` | `01-checkout` (`checkout`) | Fetches submodules (`--depth 1`) |
 | `02` | `02-build-ghidra` (`build-ghidra`) | Checks the version pin, runs `build-ghidra.sh` |
 | `03` | `03-install-ghidra` (`install-ghidra`) | Extracts the zip to `dist/`, patches `launch.properties` |
@@ -107,8 +116,9 @@ Operational context, invariants and conventions for AI coding agents working in 
 | — | `verify-extensions` | Checks headlessly that every extension's key classes load |
 | `13` | `13-pyghidra` (`pyghidra`) | Sets up PyGhidra's venv in `portable/` with `bundle_mpq` |
 | `14` | `14-venv` (`venv`) | Creates `.venv` and installs `bridge-mcp-ghidra` |
-| `15` | `15-register-mcp` (`register-mcp`) | Registers `ghidra` with opencode (atomic JSON write) and Claude Code (`claude mcp add --scope user`, skipped if `claude` is absent) |
-| — | `test` | Sanity suite (`tests/run-sanity.sh`), in sections: `extensions`, `fixtures` (ELF/DOS/LE via `SanityCheck.java`), `mcp` (GhidraMCP over HTTP on `TEST_MCP_PORT`, 18089), `dist`, `binexport`, `portable`, `jython`, `pyghidra`. `SANITY_ONLY=dist,pyghidra make test` runs a subset |
+| `15` | `15-register-mcp` (`register-mcp`) | Registers `ghidra` with opencode (atomic JSON write) and Claude Code (`claude mcp add --scope user`, skipped if `claude` is absent), through the `register_mcp` macro |
+| `16` | `16-install-rea` (`install-rea`) | Installs the pinned REA into `.rea/` with npm, writes the `.rea/rea` wrapper and registers `rea` (`register_mcp`); skipped without a suitable Node.js |
+| — | `test` | Sanity suite (`tests/run-sanity.sh`), in sections: `extensions`, `fixtures` (ELF/DOS/LE via `SanityCheck.java`), `mcp` (GhidraMCP over HTTP on `TEST_MCP_PORT`, 18089), `dist`, `binexport`, `portable`, `jython`, `pyghidra`, `rea`. `SANITY_ONLY=dist,pyghidra make test` runs a subset |
 
 Runtime and maintenance: `install` (runs `$(PIPELINE)`, all of the above, with `verify-extensions` after stage 12 so a broken extension stops the install before MCP registration, ending with `test`), `run`, `run-bridge`, `verify` (probes `http://127.0.0.1:8089/check_connection`), `clean`, `distclean`.
 

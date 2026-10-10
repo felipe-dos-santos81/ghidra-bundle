@@ -15,6 +15,7 @@ A reproducible, self-contained **Ghidra 12.1.4**, built from source with eight e
 | [BinExport](https://github.com/google/binexport) | Exporter for BinDiff |
 | [D2GridraTools](https://github.com/dzik87/D2GridraTools) | Diablo 2 1.14d scripts, run under Ghidra's Jython extension |
 | PyGhidra + `bundle_mpq` | Python 3 scripting with MPQ archive access (StormLib) |
+| [REA](https://github.com/morluto/rea) 6.3.0 (optional) | CLI and MCP server that analyzes a file through this Ghidra without the GUI; needs Node.js |
 
 ## Quickstart
 
@@ -25,7 +26,7 @@ make install   # installs missing packages, builds and installs everything
 make run       # launches Ghidra
 ```
 
-`make install` installs any missing prerequisites with `sudo apt` (Linux) or `brew` (macOS): JDK 21, Maven, Clang, Python 3.10+, uv, Git, curl, GNU `timeout` (`gtimeout` on macOS) and, optionally, StormLib (`libstorm-dev`) for MPQ support. Run `make env` to check them. GhidrAssist, RevEng.AI and BinExport download their Java dependencies on the first build. The Ghidra source build takes several minutes; every stage skips work that is already done.
+`make install` installs any missing prerequisites with `sudo apt` (Linux) or `brew` (macOS): JDK 21, Maven, Clang, Python 3.10+, uv, Git, curl, GNU `timeout` (`gtimeout` on macOS) and, optionally, StormLib (`libstorm-dev`) for MPQ support. REA is installed only when npm and Node.js 22.19+, 24.11+ or 26+ are already on `PATH`; `make install` does not install Node.js. Run `make env` to check them. GhidrAssist, RevEng.AI and BinExport download their Java dependencies on the first build. The Ghidra source build takes several minutes; every stage skips work that is already done.
 
 ## Using the MCP server
 
@@ -34,6 +35,16 @@ make run       # launches Ghidra
 1. `make run`, then open a program in the CodeBrowser. This starts the GhidraMCP plugin on `127.0.0.1:8089`.
 2. `make verify` confirms the plugin answers.
 3. Restart your AI client. In Claude Code, `claude mcp get ghidra` should report it as connected.
+
+### REA
+
+When Node.js is available, `make install` also installs [REA](https://github.com/morluto/rea) into `.rea/` and registers it as the `rea` MCP server with the same two clients. REA needs no running Ghidra: it imports one file into a throwaway headless project and returns decompilation, references and strings.
+
+```bash
+.rea/rea function /path/to/program.exe entry --json   # the same wrapper the MCP server uses
+```
+
+The wrapper `.rea/rea` points REA at this bundle's Ghidra and JDK; re-run `make install-rea` after changing Node.js or the JDK. REA's sessions are read-only and deleted on close, and it rejects LE/LX files, so use the `ghidra` server for persistent projects and for DOS/4GW or OS/2 programs. REA adds about 150 tools to each client session.
 
 ## Make targets
 
@@ -59,17 +70,18 @@ Run `make help` for the same list.
 | `13-pyghidra` (`pyghidra`) | Set up PyGhidra's venv (in `portable/`) with `bundle_mpq` |
 | `14-venv` (`venv`) | Create `.venv` with `bridge-mcp-ghidra` |
 | `15-register-mcp` (`register-mcp`) | Register the MCP server with opencode and Claude Code |
+| `16-install-rea` (`install-rea`) | Install REA into `.rea/` and register its MCP server (skipped without Node.js) |
 | `test` | Run the sanity test suite (see Testing) |
 | `install` | Run all of the above, in order (ends with `test`) |
 | `run` | Launch Ghidra (fails if port 8089 is in use) |
 | `run-bridge` | Run the MCP bridge over stdio |
 | `verify` | Check the GhidraMCP plugin answers on port 8089 |
-| `clean` | Remove `dist/`, `.venv/` and build outputs |
+| `clean` | Remove `dist/`, `.venv/`, `.rea/` and build outputs |
 | `distclean` | `clean`, then de-initialize the submodules |
 
 ## Testing
 
-`make test` (also the last stage of `make install`) builds three tiny programs and checks that Ghidra handles them: an i386 ELF object (core loader and decompiler), a DOS MZ file (GhidraDosToolbox loader and syscall analyzer) and an LE file (lx-loader, including an applied fixup). It then starts GhidraMCP's headless server on port 18089 (`TEST_MCP_PORT`) and checks it over HTTP. It also checks `dist/packages/`, a headless BinExport export, Jython and the D2 scripts, PyGhidra reading a PKWARE-compressed MPQ, and that nothing was written outside `portable/`. It takes about a minute and leaves nothing behind. Run a subset with `SANITY_ONLY`, e.g. `SANITY_ONLY=dist,pyghidra make test`.
+`make test` (also the last stage of `make install`) builds three tiny programs and checks that Ghidra handles them: an i386 ELF object (core loader and decompiler), a DOS MZ file (GhidraDosToolbox loader and syscall analyzer) and an LE file (lx-loader, including an applied fixup). It then starts GhidraMCP's headless server on port 18089 (`TEST_MCP_PORT`) and checks it over HTTP. It also checks `dist/packages/`, a headless BinExport export, Jython and the D2 scripts, PyGhidra reading a PKWARE-compressed MPQ, REA decompiling the DOS MZ file (skipped when REA is not installed), and that nothing was written outside `portable/`. It takes about a minute and leaves nothing behind. Run a subset with `SANITY_ONLY`, e.g. `SANITY_ONLY=dist,pyghidra make test`.
 
 Decompiled output is also compared with `tests/snapshots/`; differences are reported but never fail the run. After a deliberate Ghidra or extension upgrade, record the new output with `UPDATE_SNAPSHOTS=1 make test`. Verified on Linux arm64; macOS is untested.
 
@@ -116,6 +128,7 @@ ghidra-bundle/
 ├── binexport/            # Submodule: BinExport (Ghidra extension in java/)
 ├── D2GridraTools/        # Submodule: Diablo 2 scripts (unlicensed; fetched only)
 ├── .venv/                # Python venv with bridge-mcp-ghidra (git-ignored)
+├── .rea/                 # REA (npm) and its rea wrapper (git-ignored; only with Node.js)
 └── dist/                 # Built Ghidra (git-ignored)
     ├── packages/            # Every built zip: Ghidra and each extension
     └── ghidra_12.1.4_PUBLIC/
