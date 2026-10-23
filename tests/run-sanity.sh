@@ -2,7 +2,7 @@
 # Sanity test suite for the Ghidra bundle; run it with `make test`.
 # Design: docs/superpowers/specs/2026-10-06-sanity-test-design.md
 #
-# Usage: tests/run-sanity.sh <ghidra install dir> <JDK 21 home>
+# Usage: tests/run-sanity.sh <ghidra install dir> <JDK 25 home>
 # Env:   UPDATE_SNAPSHOTS=1  rewrite tests/snapshots/ from this run
 #        TEST_MCP_PORT=18089  port for the GhidraMCP test server (default 18089)
 #        TEST_IMPORT_TIMEOUT=600  seconds before a fixture import is killed (default 600)
@@ -13,10 +13,10 @@
 # Needs GNU timeout (Linux: coreutils; macOS: `brew install coreutils` for gtimeout).
 set -euo pipefail
 
-INSTALL_DIR=${1:?usage: run-sanity.sh <ghidra install dir> <JDK 21 home>}
+INSTALL_DIR=${1:?usage: run-sanity.sh <ghidra install dir> <JDK 25 home>}
 # Absolute, so path checks and the pyghidraRun call (made from $WORK) see the same path.
 INSTALL_DIR=$(cd "$INSTALL_DIR" && pwd -P) || { echo "ERROR: no directory $1" >&2; exit 1; }
-export JAVA_HOME=${2:?usage: run-sanity.sh <ghidra install dir> <JDK 21 home>}
+export JAVA_HOME=${2:?usage: run-sanity.sh <ghidra install dir> <JDK 25 home>}
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TESTS="$REPO_DIR/tests"
 HEADLESS="$INSTALL_DIR/support/analyzeHeadless"
@@ -278,7 +278,7 @@ fi
 # Ghidra's own zip ends in its platform (linux_arm_64, mac_x86_64, ...); extension
 # zips also start with ghidra_{v}_, so "_64.zip" keeps the two apart.
 PACKAGE_PATTERNS=(
-  "ghidra_{v}_*_64.zip"
+  "ghidra_{v}_*_????????.zip"
   "GhidraMCP-*.zip"
   "ghidra_{v}_*_lx-loader.zip"
   "ghidra_{v}_*_dos-toolbox.zip"
@@ -292,6 +292,18 @@ PACKAGE_PATTERNS=(
 BUILD_OUTPUTS=(ghidra/build/dist ghidra-mcp/build/distributions lx-loader/dist dos-toolbox/dist
                ret-sync/ext_ghidra/dist GhidraFindcrypt/dist binexport/java/dist
                GhidrAssist/dist plugin-ghidra/dist)
+
+check_runtime() {
+  local expected actual
+  expected=$(sed -n 's/^application\.java\.compiler=//p' "$INSTALL_DIR/Ghidra/application.properties")
+  actual=$("$JAVA_HOME/bin/java" -version 2>&1 |
+    sed -n 's/^.*version "\([0-9][0-9]*\).*/\1/p' | head -n 1)
+  if [[ -n "$expected" && "$actual" == "$expected" ]]; then
+    pass "runtime: JDK $actual matches Ghidra compiler level $expected"
+  else
+    fail "runtime: JDK major '${actual:-unknown}' does not match Ghidra compiler level '${expected:-unknown}'"
+  fi
+}
 
 check_dist() {
   local version pattern dir n
@@ -319,7 +331,10 @@ check_dist() {
   done
 }
 
-if want dist; then check_dist; fi
+if want dist; then
+  check_runtime
+  check_dist
+fi
 
 # ── 3d. BinExport ─────────────────────────────────────────────────────────────
 check_binexport() {

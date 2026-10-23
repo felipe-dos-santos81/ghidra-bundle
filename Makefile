@@ -17,7 +17,7 @@ SHELL := /bin/bash
 # ── Configuration ─────────────────────────────────────────────────────────────
 
 # Must match application.version in the ghidra submodule (checked by stage 02).
-GHIDRA_VERSION := 12.1.4
+GHIDRA_VERSION := 12.2
 JAVA_MAJOR := 25
 MCP_PORT := 8089
 
@@ -47,19 +47,19 @@ UNAME_S := $(shell uname -s)
 # GNU timeout, needed by `make test`: coreutils on Linux, Homebrew's gtimeout on macOS.
 TIMEOUT_CMD := $(if $(filter Darwin,$(UNAME_S)),gtimeout,timeout)
 
-# JDK 21: JAVA21_HOME if given, else $JAVA_HOME, /usr/lib/jvm/*21*, or javac on PATH.
-ifndef JAVA21_HOME
+# JDK 25: JAVA25_HOME if given, else $JAVA_HOME, /usr/lib/jvm/*25*, or javac on PATH.
+ifndef JAVA25_HOME
 ifeq ($(UNAME_S),Darwin)
-JAVA21_HOME := $(shell /usr/libexec/java_home -F -v 21 2>/dev/null)
+JAVA25_HOME := $(shell /usr/libexec/java_home -F -v 25 2>/dev/null)
 else
-JAVA21_HOME := $(shell for j in "$$JAVA_HOME" /usr/lib/jvm/*21* \
+JAVA25_HOME := $(shell for j in "$$JAVA_HOME" /usr/lib/jvm/*25* \
 	"$$(dirname "$$(dirname "$$(readlink -f "$$(command -v javac)" 2>/dev/null)")")"; do \
-	[ -n "$$j" ] && [ -x "$$j/bin/java" ] && "$$j/bin/java" -version 2>&1 | grep -q 'version "21' && { readlink -f "$$j"; break; }; \
+	[ -n "$$j" ] && [ -x "$$j/bin/java" ] && "$$j/bin/java" -version 2>&1 | grep -q 'version "25' && { readlink -f "$$j"; break; }; \
 	done)
 endif
 endif
-export JAVA_HOME := $(JAVA21_HOME)
-export PATH := $(JAVA21_HOME)/bin:$(HOME)/.local/bin:$(HOME)/.cargo/bin:$(PATH)
+export JAVA_HOME := $(JAVA25_HOME)
+export PATH := $(JAVA25_HOME)/bin:$(HOME)/.local/bin:$(HOME)/.cargo/bin:$(PATH)
 
 # Message helpers: $(OK) "text", $(WARN) "text", $(ERR) "text", $(TICK) "label" "detail"
 OK = printf '\033[32m%s\033[0m\n'
@@ -68,9 +68,11 @@ WARN = printf '\033[33m%s\033[0m\n'
 ERR = printf '\033[31mERROR: %s\033[0m\n'
 comma := ,
 
-# Ghidra's own zip name ends in its platform (linux_arm_64, mac_x86_64, ...). Extension
-# zips also start with ghidra_<version>_, so match on "_64.zip" to tell them apart.
-GHIDRA_ZIP = ghidra_$(1)_*_64.zip
+# Ghidra 12.2 names the installation zip ghidra_<version>_<release>_<yyyymmdd>.zip with
+# no platform suffix (12.1.4 appended it, e.g. _mac_arm_64). Extension zips also start
+# with ghidra_<version>_, but end in the extension name, so match the 8-digit build
+# date to tell the installation zip apart from extension zips.
+GHIDRA_ZIP = ghidra_$(1)_*_????????.zip
 
 .PHONY: help 00-deps deps 00-env env 01-checkout checkout 02-build-ghidra build-ghidra \
 	03-install-ghidra install-ghidra 04-install-mcp install-mcp \
@@ -90,7 +92,7 @@ help: ## Show this help
 
 00-deps: ## Install missing OS packages (apt or brew) and uv
 	@if [ "$(UNAME_S)" = "Darwin" ]; then \
-		[ -d "$(JAVA21_HOME)" ] || brew install --cask temurin@21; \
+		[ -d "$(JAVA25_HOME)" ] || brew install --cask temurin@25; \
 		for p in maven:mvn python@3.12:python3 uv:uv git:git coreutils:gtimeout; do \
 			command -v $${p#*:} >/dev/null 2>&1 || brew install $${p%%:*}; \
 		done; \
@@ -99,7 +101,7 @@ help: ## Show this help
 		command -v clang >/dev/null 2>&1 || xcode-select --install; \
 	else \
 		PKGS=""; \
-		[ -d "$(JAVA21_HOME)" ] || PKGS+=" openjdk-21-jdk"; \
+		[ -d "$(JAVA25_HOME)" ] || PKGS+=" openjdk-25-jdk"; \
 		for p in maven:mvn clang:clang git:git curl:curl; do \
 			command -v $${p#*:} >/dev/null 2>&1 || PKGS+=" $${p%%:*}"; \
 		done; \
@@ -117,9 +119,11 @@ help: ## Show this help
 check_tool = command -v $(1) >/dev/null 2>&1 || { $(ERR) "$(2) not found on PATH (run 'make deps')"; exit 1; }; \
 	$(TICK) "$(2)" "$$($(3) 2>&1 | head -n 1)"
 
-00-env: ## Check host prerequisites (JDK 21, Maven, Clang, Python 3, uv, Git, curl, GNU timeout; StormLib and Node.js optional)
-	@[ -d "$(JAVA21_HOME)" ] || { $(ERR) "JDK 21 not found (run 'make deps')"; exit 1; }
-	@$(TICK) "JDK 21" "$(JAVA21_HOME)"
+00-env: ## Check host prerequisites (JDK 25, Maven, Clang, Python 3, uv, Git, curl, GNU timeout; StormLib and Node.js optional)
+	@[ -d "$(JAVA25_HOME)" ] || { $(ERR) "JDK 25 not found (run 'make deps')"; exit 1; }
+	@"$(JAVA25_HOME)/bin/java" -version 2>&1 | grep -q 'version "$(JAVA_MAJOR)' || \
+		{ $(ERR) "JAVA25_HOME is not a JDK $(JAVA_MAJOR) install: $(JAVA25_HOME)"; exit 1; }
+	@$(TICK) "JDK 25" "$(JAVA25_HOME)"
 	@$(call check_tool,mvn,Maven,mvn -version)
 	@$(call check_tool,clang,Clang,clang --version)
 	@$(call check_tool,python3,Python,python3 --version)
@@ -166,7 +170,7 @@ env: 00-env
 # (PyGhidra's launcher does not expand ${INSTALL_DIR}), so stage 03 rewrites the block
 # whenever it differs: old ${INSTALL_DIR} installs, a moved checkout, a new JDK.
 PORTABLE_BLOCK = '\# --- Portable Mode Overrides ---' \
-	'JAVA_HOME_OVERRIDE=$(JAVA21_HOME)' \
+	'JAVA_HOME_OVERRIDE=$(JAVA25_HOME)' \
 	'VMARGS=-Dapplication.settingsdir=$(PORTABLE_DIR)/settings' \
 	'VMARGS=-Dapplication.cachedir=$(PORTABLE_DIR)/cache' \
 	'VMARGS=-Dapplication.tempdir=$(PORTABLE_DIR)/temp'
@@ -175,7 +179,7 @@ PORTABLE_BLOCK = '\# --- Portable Mode Overrides ---' \
 	@if grep -qs '^# --- Portable Mode Overrides ---' "$(LAUNCH_PROPS)"; then \
 		EXPECTED=$$(printf '%s\n' $(PORTABLE_BLOCK)); \
 		if [ "$$(sed -n '/^# --- Portable Mode Overrides ---/,$$p' "$(LAUNCH_PROPS)")" != "$$EXPECTED" ]; then \
-			[ -d "$(JAVA21_HOME)" ] || { $(ERR) "JDK 21 not found (run 'make deps')"; exit 1; }; \
+			[ -d "$(JAVA25_HOME)" ] || { $(ERR) "JDK 25 not found (run 'make deps')"; exit 1; }; \
 			{ sed '/^# --- Portable Mode Overrides ---/,$$d' "$(LAUNCH_PROPS)" && echo "$$EXPECTED"; } \
 				> "$(LAUNCH_PROPS).tmp" && mv "$(LAUNCH_PROPS).tmp" "$(LAUNCH_PROPS)" || exit 1; \
 			$(OK) "Rewrote the portable-mode block in launch.properties for $(INSTALL_DIR)."; \
@@ -405,7 +409,7 @@ register-mcp: 15-register-mcp
 	fi; \
 	NODE=$$(node -p process.execPath) || exit 1; \
 	printf '%s\n' '#!/bin/sh' "# Written by 'make install-rea'." \
-		'export GHIDRA_INSTALL_DIR="$(INSTALL_DIR)" JAVA_HOME="$(JAVA21_HOME)" REA_ANALYSIS_PROVIDER=ghidra' \
+		'export GHIDRA_INSTALL_DIR="$(INSTALL_DIR)" JAVA_HOME="$(JAVA25_HOME)" REA_ANALYSIS_PROVIDER=ghidra' \
 		'export TMPDIR="$(PORTABLE_DIR)/temp"' \
 		"exec \"$$NODE\" \"$(REA_DIR)/node_modules/.bin/rea\" \"\$$@\"" > "$(REA_BIN)" \
 		&& chmod +x "$(REA_BIN)" || exit 1; \
@@ -424,8 +428,8 @@ install: $(PIPELINE) ## Run the full pipeline (all stages above, in order)
 	@$(OK) "Ghidra Bundle installed. Run 'make run' to launch Ghidra."
 
 test: ## Run the sanity test suite (fixtures, extensions, GhidraMCP, dist, BinExport, Jython, PyGhidra, REA, portable mode)
-	@[ -d "$(JAVA21_HOME)" ] || { $(ERR) "JDK 21 not found (run 'make deps')"; exit 1; }
-	@PACKAGES_DIR="$(PACKAGES_DIR)" REA_BIN="$(REA_BIN)" tests/run-sanity.sh "$(INSTALL_DIR)" "$(JAVA21_HOME)"
+	@[ -d "$(JAVA25_HOME)" ] || { $(ERR) "JDK 25 not found (run 'make deps')"; exit 1; }
+	@PACKAGES_DIR="$(PACKAGES_DIR)" REA_BIN="$(REA_BIN)" tests/run-sanity.sh "$(INSTALL_DIR)" "$(JAVA25_HOME)"
 
 run: ## Launch Ghidra (fails if port 8089 is already in use)
 	@[ -x "$(INSTALL_DIR)/ghidraRun" ] || { $(ERR) "Ghidra not installed; run 'make install'"; exit 1; }
