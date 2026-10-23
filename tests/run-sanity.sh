@@ -338,10 +338,18 @@ PACKAGE_PATTERNS=(
   "ghidra_{v}_*_GhidrAssist.zip"
   "ghidra_{v}_*_plugin-ghidra.zip"
 )
-# Build folders that must hold no current zip once install has moved them.
+# Build folders that must hold no current zip once install has moved them. The six
+# API-patched extensions build in disposable copies under dist/build/ (Makefile
+# stages 04-08 and 10), so each also guards its copy's zip output dir; the remaining
+# entries guard the extensions' source trees against accidental in-tree builds, plus
+# the unpatched ret-sync and BinExport trees.
 BUILD_OUTPUTS=(ghidra/build/dist ghidra-mcp/build/distributions lx-loader/dist dos-toolbox/dist
                ret-sync/ext_ghidra/dist GhidraFindcrypt/dist binexport/java/dist
-               GhidrAssist/dist plugin-ghidra/dist)
+               GhidrAssist/dist plugin-ghidra/dist
+               dist/build/ghidra-mcp/build/distributions
+               dist/build/lx-loader/dist dist/build/dos-toolbox/dist
+               dist/build/GhidrAssist/dist dist/build/plugin-ghidra/dist
+               dist/build/GhidraFindcrypt/dist)
 
 check_runtime() {
   local expected actual
@@ -368,7 +376,7 @@ check_dist() {
     fi
   done
   for dir in "${BUILD_OUTPUTS[@]}"; do
-    if [[ "$dir" == ghidra-mcp/* ]]; then  # GhidraMCP zips carry their own version
+    if [[ "$dir" == *ghidra-mcp* ]]; then  # GhidraMCP zips carry their own version
       n=$(count_matches "$REPO_DIR/$dir" "*.zip")
     else
       n=$(count_matches "$REPO_DIR/$dir" "*${version}*.zip")
