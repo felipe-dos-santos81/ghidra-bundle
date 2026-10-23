@@ -18,6 +18,7 @@ SHELL := /bin/bash
 
 # Must match application.version in the ghidra submodule (checked by stage 02).
 GHIDRA_VERSION := 12.1.4
+JAVA_MAJOR := 25
 MCP_PORT := 8089
 
 BUNDLE_DIR := $(CURDIR)
@@ -217,6 +218,8 @@ if [ -d "$(EXT_DIR)/$(1)" ] && compgen -G "$(PACKAGES_DIR)/$(notdir $(3))" >/dev
 else \
 	echo "Building $(1)$${SRC:+ from $${SRC:0:7}}..."; \
 	(cd "$(2)/$(or $(5),.)" && "$(BUNDLE_DIR)/ghidra/gradlew" -p . \
+		-I "$(BUNDLE_DIR)/scripts/gradle-toolchain.init.gradle" \
+		-PbundleJavaMajor=$(JAVA_MAJOR) \
 		-PGHIDRA_INSTALL_DIR="$(INSTALL_DIR)" buildExtension) || exit 1; \
 	ZIP=$$(ls -1t $(3) 2>/dev/null | head -n 1); \
 	[ -n "$$ZIP" ] || { $(ERR) "no zip matching $(3)"; exit 1; }; \

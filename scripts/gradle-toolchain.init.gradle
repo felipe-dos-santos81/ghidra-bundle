@@ -1,0 +1,17 @@
+import org.gradle.api.plugins.JavaPluginExtension
+import org.gradle.jvm.toolchain.JavaLanguageVersion
+
+def requestedMajor = gradle.startParameter.projectProperties['bundleJavaMajor']
+if (requestedMajor == null || !(requestedMajor ==~ /[1-9]\d*/)) {
+    throw new GradleException('bundleJavaMajor must be a positive integer (for example, 25)')
+}
+def javaMajor = requestedMajor.toInteger()
+
+gradle.projectsEvaluated {
+    allprojects { project ->
+        def javaExtension = project.extensions.findByType(JavaPluginExtension)
+        if (javaExtension != null) {
+            javaExtension.toolchain.languageVersion.set(JavaLanguageVersion.of(javaMajor))
+        }
+    }
+}
