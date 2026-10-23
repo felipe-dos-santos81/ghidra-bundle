@@ -17,8 +17,6 @@ A reproducible, self-contained **Ghidra 12.2**, built from source with eight ext
 | PyGhidra + `bundle_mpq` | Python 3 scripting with MPQ archive access (StormLib) |
 | [REA](https://github.com/morluto/rea) 6.3.0 (optional) | CLI and MCP server that analyzes a file through this Ghidra without the GUI; needs Node.js |
 
-> **12.2 upgrade status:** The core Ghidra build and focused REA checks pass with JDK 25. `make install` currently stops at `04-install-mcp` because GhidraMCP uses the two-argument `DataTypeManager.remove` removed in 12.2. The remaining extension builds and full sanity suite are unverified pending a compatibility design.
-
 ## Quickstart
 
 ```bash
@@ -147,6 +145,7 @@ ghidra-bundle/
 ## Notes
 
 - **Changing the Ghidra version:** check out the new tag in the `ghidra` submodule and update `GHIDRA_VERSION` in the `Makefile`. Stage 02 refuses to build if they disagree. Upgrades do not migrate projects or settings; remove superseded installations explicitly when no longer needed.
+- **Ghidra 12.2 compatibility patches:** Ghidra 12.2 removed or changed a few extension APIs, so six extensions (GhidraMCP, lx-loader, GhidraDosToolbox, GhidrAssist, RevEng.AI, GhidraFindcrypt) build from fresh copies under `dist/build/` where `scripts/prepare-extension-source.py` applies small, exact compatibility patches; the submodule checkouts stay pristine. ret-sync and BinExport build unmodified.
 - **Directory names matter:** keep extension names from their zips and the `GhidrAssist`, `plugin-ghidra`, and `GhidraFindcrypt` submodule paths. Ghidra requires each jar name to start with its extension directory name; `make verify-extensions` checks class loading.
 - **Built zips** are collected in `dist/packages/`, one per artifact; the subprojects' own `dist/` folders are emptied of current-version zips.
-- **Rebuilding:** stages skip existing outputs; extensions rebuild when their submodule commit changes or their zip is missing. Run `make clean`, or delete one extension under `dist/.../Ghidra/Extensions/`, to rebuild.
+- **Rebuilding:** stages skip existing outputs; extensions rebuild when their submodule commit or compatibility patch changes, or when their zip is missing. Run `make clean`, or delete one extension under `dist/.../Ghidra/Extensions/`, to rebuild.

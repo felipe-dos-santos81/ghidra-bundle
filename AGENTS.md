@@ -20,8 +20,6 @@ Operational context, invariants and conventions for AI coding agents working in 
 - **PyGhidra + `bundle_mpq`**: PyGhidra's venv in `portable/`, with a ctypes StormLib MPQ reader (`python/bundle-mpq`).
 - **REA** (`rea-agents` 6.3.0, optional): CLI and MCP server (`rea`) that analyzes files through this Ghidra headlessly, installed in `.rea/`. Needs Node.js.
 
-**Current upgrade blocker:** `make install` stops at `04-install-mcp` because GhidraMCP calls the two-argument `DataTypeManager.remove` removed in 12.2. A source-compatibility strategy still requires approval; the remaining extensions and full sanity suite are unverified. The core 12.2 build and focused REA checks pass with JDK 25.
-
 ---
 
 ## 2. Invariants
@@ -42,7 +40,7 @@ Operational context, invariants and conventions for AI coding agents working in 
 - To test whether the patch is already applied, grep for `^# --- Portable Mode Overrides ---`, not `application.settingsdir`, which also matches upstream's commented lines.
 
 ### 2.2 Extension Placement
-- Each extension stage records its source commit in `<ext>/.bundle-source` and rebuilds when the submodule commit changes.
+- Each extension stage records its source commit in `<ext>/.bundle-source` (and its patch identity in `<ext>/.bundle-patch`, §2.9) and rebuilds when either changes.
 - Extensions are unzipped into `dist/ghidra_12.2_PUBLIC/Ghidra/Extensions/`, keeping the directory name from their zip:
   - `GhidraMCP/` (`lib/GhidraMCP-<ver>.jar`)
   - `lx-loader/` (`lib/lx-loader.jar`)
@@ -95,6 +93,13 @@ Operational context, invariants and conventions for AI coding agents working in 
 - `$(REA_BIN)` = `.rea/rea` is a wrapper written on every run of the stage. It sets `GHIDRA_INSTALL_DIR`, `JAVA_HOME`, `REA_ANALYSIS_PROVIDER=ghidra` and `TMPDIR` (`portable/temp`, where REA keeps each session's project and its copy of the analyzed file) and calls node by absolute path, so both MCP registrations are just `.rea/rea --mcp`. Re-run `make install-rea` after changing Node or the JDK.
 - REA's Ghidra sessions read `launch.properties`, so they write under `portable/` (in `<user>-ghidra/` directories, next to the GUI's `ghidra/`). Never run `rea setup`: it writes skills and registrations into several agent directories under `~`.
 - REA has no NE, LE or LX support and imports DOS MZ with Ghidra's stock `MzLoader`, so GhidraMCP with lx-loader and GhidraDosToolbox stays the path for that work. It rejects such a file only when the MZ header points at the NE/LE/LX header. A DOS/4GW-bound program (the LE follows the extender stub) is admitted as plain MZ, and REA then analyzes only the 16-bit stub, without a warning.
+
+### 2.9 Extension Source Compatibility (Ghidra 12.2 API breaks)
+- Ghidra 12.2 removed or changed APIs that six extensions use. Stages 04–08 and 10 first run `scripts/prepare-extension-source.py`, which copies the extension's source into a fresh, git-ignored tree under `dist/build/<ext>/` (skipping `.git`, `.gradle`, `build`, `target`, `dist`, `__pycache__`), applies that extension's exact 12.2 replacements there, and leaves the original submodule byte-identical. The script is fail-closed: it accepts only the pinned Ghidra version (12.2; 12.2.1 and others are rejected), requires every anchor at its exact occurrence count, recognizes an already-patched source (idempotence), rejects missing/duplicated/mixed/partial forms, and replaces the destination only after all patches validate — a failed run never leaves a half-patched tree. Ret-sync and BinExport build directly, without source patches.
+- Covered transformations: GhidraMCP drops the removed second `DataTypeManager.remove` argument; lx-loader drops the removed `Writeable` interface from `DOSHeader` while retaining its public `write` method; dos-toolbox simplifies a `DosLoader` condition whose `OldDOSHeader.hasNewExeHeader()`/`hasPeHeader()` checks were always false; GhidrAssist drops two obsolete `@Override`s on the removed `TaskMonitor.checkCanceled`/`clearCanceled` aliases; GhidraFindcrypt renames `checkCanceled()` to `checkCancelled()`; RevEng.AI injects the `PluginTool` as the `ServiceProvider` for `BrowserLoader.display` and `GhidraRevengService`, including a real provider assertion in its existing plugin test.
+- Rebuild identity: `install_extension`'s optional 6th argument names the original submodule whose `git rev-parse HEAD` goes into `<ext>/.bundle-source`; the optional 7th is the patch identity written to `<ext>/.bundle-patch`. Patched stages pass `<extension>-$(shell git hash-object scripts/prepare-extension-source.py)`, so editing the script forces every patched extension to rebuild; the build copy is regenerated on every stage run, so patched sources cannot go stale.
+- To extend the mechanism for a new API break: add the extension's exact old→new anchors (with counts) to `EXTENSIONS` in `scripts/prepare-extension-source.py`, mirror a stage's `*_BUILD_DIR`/`*_PATCH_ID` wiring under `dist/build/`, add tests to `tests/test_prepare_extension_source.py`, and add its real zip output directory to `BUILD_OUTPUTS` in `tests/run-sanity.sh` (which guards both the original build-output dirs and the actual `dist/build/` copies). A break without an exact, tested transformation is still a stop, not a guess.
+- `tests/test_prepare_extension_source.py` covers every transformation, idempotence, fail-closed anchor rejection and read-only application against the real pinned submodule sources; run it standalone (`python3 -I tests/test_prepare_extension_source.py`). The `rea` sanity section separately runs `tests/test_patch_rea_ghidra.py`.
 
 ---
 

@@ -1,7 +1,7 @@
 # Ghidra 12.2 Upgrade — Design
 
 Date: 2026-10-23
-Status: approved; not yet implemented
+Status: approved; implemented and verified
 
 ## 1. Goal
 
@@ -24,9 +24,10 @@ bridge and optional REA integration.
 
 ### Out of scope
 
-- Migrating or deleting an existing `dist/ghidra_12.1.4_PUBLIC/` installation,
-  user projects or user settings. The old installation may remain on disk but is
-  no longer selected by the Makefile.
+- Migrating user projects or user settings between releases; no migration is
+  attempted or planned. The generated 12.1.4 installations and archives were
+  removed from both build checkouts after the full 12.2 pipeline passed
+  verification; no 12.1.4 artifact remains selected by the Makefile.
 - Upgrading REA or other third-party components for reasons unrelated to Ghidra
   12.2 compatibility.
 - Claiming upstream REA support for Ghidra 12.2, or disabling REA's version
@@ -42,6 +43,12 @@ bridge and optional REA integration.
   archives modified by 12.2 might not open in earlier releases.
 - GhidraMCP and BinExport currently hard-code a Java 21 Gradle toolchain. A Java
   21 compiler cannot consume Ghidra 12.2's Java 25 classes.
+- Ghidra 12.2 also removed or changed extension APIs used by six bundled
+  extensions: the two-argument `DataTypeManager.remove`, the `Writeable`
+  bin-format interface, `OldDOSHeader.hasNewExeHeader()`/`hasPeHeader()`, the
+  deprecated `TaskMonitor.checkCanceled()`/`clearCanceled()` aliases (surviving
+  as `checkCancelled()`/`clearCancelled()`), and the one-argument
+  `BrowserLoader.display(URL)` overload.
 - REA 6.3.0 accepts Ghidra 12.1.x only. The latest published REA 6.7.0 and the
   upstream `master` policy checked during design still verify 12.1.4 and accept
   only that release line. No supported override was found.
@@ -67,9 +74,11 @@ Rejected alternatives:
 - **Disable REA:** avoids the REA patch but removes an existing optional feature.
   It is a fallback requiring a new user decision, not part of this design.
 
-If Ghidra 12.2 exposes additional extension API breaks that require editing
-submodule source files, implementation stops and this design is revised rather
-than silently expanding scope.
+Extension API breaks are handled by root-managed build copies (see §5): exact,
+fail-closed 12.2 compatibility patches are applied to fresh ignored copies under
+`dist/build/` while third-party submodule sources stay byte-identical, and the
+rebuild identity is versioned. A break without an exact, tested transformation
+still stops implementation rather than silently expanding scope.
 
 ## 4. Version and JDK selection
 
@@ -108,6 +117,47 @@ input fails the build instead of silently selecting a host JDK. Extension
 archives keep their existing names and locations, and `VerifyExtensions.java`
 remains the class-discovery check.
 
+### Extension source compatibility (implemented build copies)
+
+Stages 04–08 and 10 do not build the third-party checkouts directly. They first
+run `scripts/prepare-extension-source.py <extension> <source-dir>
+<destination-dir> <ghidra-version>`, which copies the extension's source into a
+fresh directory under `dist/build/<ext>/` (excluding `.git`, `.gradle`,
+`build`, `target`, `dist` and `__pycache__`) and applies that extension's exact
+anchor-based 12.2 replacements there. The original submodule is never modified.
+The script is fail-closed: it accepts only the pinned version `12.2` (12.2.1
+and others are rejected), requires every anchor at its exact occurrence count,
+recognizes an already-patched source so reruns are idempotent, rejects
+missing/duplicated/mixed/partial forms, and replaces the destination only after
+every patch validates, so a failed run never leaves a half-patched tree.
+
+The six covered transformations: GhidraMCP drops the removed second
+`DataTypeManager.remove` argument; lx-loader removes the removed `Writeable`
+interface from `DOSHeader` while retaining its public `write` method;
+GhidraDosToolbox simplifies a `DosLoader` condition whose
+`OldDOSHeader.hasNewExeHeader()`/`hasPeHeader()` checks were always false;
+GhidrAssist removes two obsolete `@Override` annotations on the removed
+`TaskMonitor.checkCanceled`/`clearCanceled` aliases; GhidraFindcrypt renames
+`checkCanceled()` to `checkCancelled()`; RevEng.AI injects the `PluginTool` as
+the `ServiceProvider` for `BrowserLoader.display` and `GhidraRevengService`,
+including a real provider assertion in its existing plugin test. Ret-sync and
+BinExport build directly, without source patches.
+
+Rebuild identity is versioned rather than assumed. `install_extension` gained
+optional sixth (original source directory, whose `git rev-parse HEAD` is
+recorded) and seventh (patch identity) arguments. Patched stages pass
+`<extension>-$(git hash-object scripts/prepare-extension-source.py)`; the stage
+writes the original commit to `<ext>/.bundle-source` and the patch identity to
+`<ext>/.bundle-patch`, and rebuilds when either changes. The build copy is
+regenerated on every stage run, so patched sources cannot go stale after a
+script edit.
+
+Tests: `tests/test_prepare_extension_source.py` covers every transformation,
+idempotence, fail-closed anchor rejection and read-only application against the
+real pinned submodule sources. `tests/run-sanity.sh`'s `BUILD_OUTPUTS` guards
+both the original build-output directories and the actual `dist/build/` copies,
+so the packages-move check covers the trees that really build.
+
 ## 6. REA compatibility patch
 
 Keep `rea-agents` pinned to 6.3.0 and its existing lockfile unchanged. Add a
@@ -145,10 +195,16 @@ evidence of compatibility.
 - Update current-version references in `README.md` and `AGENTS.md`, including
   JDK 25, the 12.2 tag/install path, the extension toolchain init script and
   REA's bundle-managed compatible-but-unverified status.
+- Document the build-copy compatibility mechanism: one short user-facing note
+  in `README.md`, operational invariants for extending it in `AGENTS.md`.
+  Remove the temporary upgrade-blocker notes once the full pipeline passes; do
+  not replace them with a success banner.
 - Leave historical specs and implementation plans unchanged.
 - Update JDK usage text in `tests/run-sanity.sh`; retain its existing checks.
-- Review snapshot differences caused by Ghidra 12.2, record intentional output
-  with `UPDATE_SNAPSHOTS=1 make test`, then run the suite normally again.
+- Review snapshot differences caused by Ghidra 12.2 and record intentional
+  output with `UPDATE_SNAPSHOTS=1 make test`. The real 12.2 runs produced no
+  snapshot differences, so `tests/snapshots/` and `tests/expect/` remain
+  unchanged.
 
 ## 8. Error handling and compatibility boundaries
 
@@ -156,8 +212,9 @@ evidence of compatibility.
   fatal, now with JDK 25 messages.
 - An invalid toolchain property or unexpected REA package/policy source is
   fatal; neither compatibility shim falls back to an untested substitution.
-- The new install directory keeps the previous installation untouched. No user
-  project or settings migration is attempted.
+- The new install directory keeps the previous installation untouched while
+  both exist; after full 12.2 verification the generated 12.1.4 artifacts were
+  removed explicitly (§1). No user project or settings migration is attempted.
 - Portable-mode behavior is unchanged: all settings, caches, temporary files,
   PyGhidra state and REA sessions remain under the new install's `portable/`.
 - Optional StormLib and Node/npm behavior remains as documented. Optional REA
@@ -169,16 +226,21 @@ evidence of compatibility.
 Run the repository's standard checks on the resulting install:
 
 1. `make help`, `make env` and `make -n install`.
-2. `bash -n` for the changed shell scripts and Python byte-compilation for the
-   new patch script.
+2. `bash -n` for the changed shell scripts and Python byte-compilation of both
+   compatibility scripts (`scripts/patch-rea-ghidra.py`,
+   `scripts/prepare-extension-source.py`) and both test modules
+   (`tests/test_patch_rea_ghidra.py`, `tests/test_prepare_extension_source.py`),
+   plus a standalone run of the 32 prepare-source unit tests.
 3. Full `make install`, including the Ghidra source build, every extension,
    extension discovery and the sanity suite.
-4. `make test` after snapshot refresh, with all sections passing or only the
-   documented optional StormLib skips. REA must not be skipped on this machine,
-   where its Node runtime is available.
+4. `make test` normally and with `UPDATE_SNAPSHOTS=1` (requiring no snapshot
+   changes), with all sections passing and no skips — including the REA policy
+   unit tests, REA doctor and a real REA DOS MZ decompilation on this machine.
 5. Confirm the installed `application.version` is `12.2`, the selected runtime
-  is JDK 25, `git diff --check` passes and version-control status contains only
-  the intended upgrade changes.
+   is JDK 25, neither checkout retains `dist/ghidra_12.1.4_PUBLIC` or
+   `dist/packages/*12.1.4*`, all submodules are clean, `git diff --check`
+   passes and version-control status contains only the intended upgrade
+   changes.
 
 A failed real build or test is fixed before completion; compilation, imports or
 a successful text patch alone do not establish the upgrade.
