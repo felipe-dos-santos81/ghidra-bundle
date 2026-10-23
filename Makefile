@@ -1,14 +1,6 @@
-# Ghidra Bundle: portable Ghidra built from source, with its extensions, Jython,
-# D2GridraTools and PyGhidra (see AGENTS.md). Built zips are collected in
-# dist/packages/. `make install` runs the numbered stages in order:
-#   00-deps → 00-env → 01-checkout → 02-build-ghidra → 03-install-ghidra →
-#   04-install-mcp → 05-install-lx-loader → 06-install-dos-toolbox →
-#   07-install-ghidrassist → 08-install-reveng →
-#   09-install-retsync → 10-install-findcrypt → 11-install-binexport →
-#   12-install-scripts →
-#   verify-extensions → 13-pyghidra → 14-venv → 15-register-mcp →
-#   16-install-rea → test
-# Every stage is idempotent and skips work that is already done.
+# Portable Ghidra built from source with extensions, Jython, D2GridraTools and PyGhidra.
+# `make install` runs the full pipeline; `make help` lists targets.
+# Stages are idempotent, and built zips are collected in dist/packages/.
 
 .NOTPARALLEL:
 .DEFAULT_GOAL := help
@@ -68,11 +60,9 @@ WARN = printf '\033[33m%s\033[0m\n'
 ERR = printf '\033[31mERROR: %s\033[0m\n'
 comma := ,
 
-# Ghidra 12.2 names the installation zip ghidra_<version>_<release>_<yyyymmdd>.zip with
-# no platform suffix (12.1.4 appended it, e.g. _mac_arm_64). Extension zips also start
-# with ghidra_<version>_, but end in the extension name, so match the 8-digit build
-# date to tell the installation zip apart from extension zips.
-GHIDRA_ZIP = ghidra_$(1)_*_????????.zip
+# Ghidra 12.2 installation zips end in an eight-digit build date, not a platform.
+# Match that date to distinguish them from extension zips.
+GHIDRA_ZIP = ghidra_$(1)_*_[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].zip
 
 .PHONY: help 00-deps deps 00-env env 01-checkout checkout 02-build-ghidra build-ghidra \
 	03-install-ghidra install-ghidra 04-install-mcp install-mcp \
@@ -389,12 +379,11 @@ register-mcp: 15-register-mcp
 
 # ── Stage 16: REA ─────────────────────────────────────────────────────────────
 
-# REA is not a Ghidra extension: it runs this Ghidra headlessly through its own bridge
-# script. $(REA_BIN) is a wrapper that binds it to this install's Ghidra and JDK, with
-# node's absolute path so MCP clients need no node on their PATH, and keeps REA's session
-# files in portable/temp. The stage is optional: when Node.js is unsuitable or npm fails it
-# warns, drops a wrapper that no longer runs (so `make test` skips too) and carries on.
-16-install-rea: 03-install-ghidra ## Install REA into .rea/ and register the "rea" MCP server (optional: skipped without Node.js)
+# REA runs this Ghidra headlessly through its own bridge. The stage patches the pinned
+# policy for Ghidra 12.2, then writes a wrapper bound to this install and JDK. The wrapper
+# uses node's absolute path and keeps sessions in portable/temp. Unsuitable Node.js or an
+# npm failure skips REA; a policy-patch failure stops the stage.
+16-install-rea: 03-install-ghidra ## Install REA, apply the Ghidra 12.2 patch, and register its MCP server (optional)
 	@skip() { $(WARN) "$$1: skipping REA (optional)."; \
 		"$(REA_BIN)" --version >/dev/null 2>&1 || rm -f "$(REA_BIN)"; exit 0; }; \
 	{ $(REA_NODE_CHECK); } 2>/dev/null || skip "$(REA_NODE_WANT) not found"; \
@@ -407,6 +396,8 @@ register-mcp: 15-register-mcp
 		echo "$$LOCK" > "$(REA_DIR)/node_modules/.bundle-lock"; \
 		$(OK) "REA installed in $(REA_DIR)."; \
 	fi; \
+	python3 -I scripts/patch-rea-ghidra.py \
+		"$(REA_DIR)/node_modules/rea-agents" "$(GHIDRA_VERSION)" || exit 1; \
 	NODE=$$(node -p process.execPath) || exit 1; \
 	printf '%s\n' '#!/bin/sh' "# Written by 'make install-rea'." \
 		'export GHIDRA_INSTALL_DIR="$(INSTALL_DIR)" JAVA_HOME="$(JAVA25_HOME)" REA_ANALYSIS_PROVIDER=ghidra' \

@@ -275,10 +275,10 @@ fi
 
 # ── 3c. dist/packages ─────────────────────────────────────────────────────────
 # Zips that must each match exactly one file in $PACKAGES_DIR ({v} = Ghidra version).
-# Ghidra's own zip ends in its platform (linux_arm_64, mac_x86_64, ...); extension
-# zips also start with ghidra_{v}_, so "_64.zip" keeps the two apart.
+# Ghidra 12.2's installation zip ends in an eight-digit build date; extension zips
+# end in their names instead.
 PACKAGE_PATTERNS=(
-  "ghidra_{v}_*_????????.zip"
+  "ghidra_{v}_*_[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].zip"
   "GhidraMCP-*.zip"
   "ghidra_{v}_*_lx-loader.zip"
   "ghidra_{v}_*_dos-toolbox.zip"
@@ -483,6 +483,15 @@ check_pyghidra() {
 if want pyghidra; then check_pyghidra; fi
 
 # ── 3h. REA ───────────────────────────────────────────────────────────────────
+check_rea_patch() {
+  local log="$WORK/rea-policy-tests.log"
+  if python3 -I "$TESTS/test_patch_rea_ghidra.py" > "$log" 2>&1; then
+    pass "REA: Ghidra policy patch unit tests pass"
+  else
+    fail_with_log "REA: Ghidra policy patch unit tests failed" "$log"
+  fi
+}
+
 check_rea() {
   local out="$WORK/rea.json" home="$WORK/rea-home"
   if [[ ! -x "$REA_BIN" ]]; then
@@ -515,7 +524,10 @@ check_rea() {
   fi
 }
 
-if want rea; then check_rea; fi
+if want rea; then
+  check_rea_patch
+  check_rea
+fi
 
 if want portable; then check_leaks; fi
 

@@ -6,8 +6,8 @@ Operational context, invariants and conventions for AI coding agents working in 
 
 ## 1. Project Overview
 
-`ghidra-bundle` builds an isolated, reproducible **Ghidra 12.1.4** from source, with eight extensions, the Jython runtime, D2GridraTools scripts, a PyGhidra venv and a local Model Context Protocol (MCP) bridge:
-- **Ghidra 12.1.4**: built headlessly with Gradle from the `Ghidra_12.1.4_build` tag.
+`ghidra-bundle` builds an isolated, reproducible **Ghidra 12.2** from source, with eight extensions, the Jython runtime, D2GridraTools scripts, a PyGhidra venv and a local Model Context Protocol (MCP) bridge:
+- **Ghidra 12.2**: built headlessly with Gradle from the `Ghidra_12.2_build` tag.
 - **GhidraMCP**: HTTP server plugin (port 8089) and Python bridge (`bridge-mcp-ghidra`).
 - **lx-loader**: Linear Executable (`LE`/`LX`) loader (DOS/4GW, OS/2, VxD).
 - **GhidraDosToolbox**: MS-DOS loader and analyzers (`wip-ghidra-12` branch).
@@ -20,6 +20,8 @@ Operational context, invariants and conventions for AI coding agents working in 
 - **PyGhidra + `bundle_mpq`**: PyGhidra's venv in `portable/`, with a ctypes StormLib MPQ reader (`python/bundle-mpq`).
 - **REA** (`rea-agents` 6.3.0, optional): CLI and MCP server (`rea`) that analyzes files through this Ghidra headlessly, installed in `.rea/`. Needs Node.js.
 
+**Current upgrade blocker:** `make install` stops at `04-install-mcp` because GhidraMCP calls the two-argument `DataTypeManager.remove` removed in 12.2. A source-compatibility strategy still requires approval; the remaining extensions and full sanity suite are unverified. The core 12.2 build and focused REA checks pass with JDK 25.
+
 ---
 
 ## 2. Invariants
@@ -29,19 +31,19 @@ Operational context, invariants and conventions for AI coding agents working in 
 - `03-install-ghidra` appends this block to `support/launch.properties`, with the absolute install path:
   ```properties
   # --- Portable Mode Overrides ---
-  JAVA_HOME_OVERRIDE=<JAVA21_HOME>
+  JAVA_HOME_OVERRIDE=<JAVA25_HOME>
   VMARGS=-Dapplication.settingsdir=<INSTALL_DIR>/portable/settings
   VMARGS=-Dapplication.cachedir=<INSTALL_DIR>/portable/cache
   VMARGS=-Dapplication.tempdir=<INSTALL_DIR>/portable/temp
   ```
   The paths must be absolute: PyGhidra's launcher reads `application.settingsdir` without expanding `${INSTALL_DIR}`. Stage 03 rewrites the block whenever it differs from the expected one (old installs with `${INSTALL_DIR}`, a moved checkout, a new JDK).
 - The GhidrAssist and RevEng.AI forks keep their data under Ghidra's user settings directory (`portable/settings/.../GhidrAssist`, `.../reai/reai.json`); `tests/probes/PortablePaths.java` checks their defaults.
-- All preferences, caches and temp files live under `dist/ghidra_12.1.4_PUBLIC/portable/`. Headless runs (`analyzeHeadless`) read the same `launch.properties`, so they write there too.
+- All preferences, caches and temp files live under `dist/ghidra_12.2_PUBLIC/portable/`. Headless runs (`analyzeHeadless`) read the same `launch.properties`, so they write there too.
 - To test whether the patch is already applied, grep for `^# --- Portable Mode Overrides ---`, not `application.settingsdir`, which also matches upstream's commented lines.
 
 ### 2.2 Extension Placement
 - Each extension stage records its source commit in `<ext>/.bundle-source` and rebuilds when the submodule commit changes.
-- Extensions are unzipped into `dist/ghidra_12.1.4_PUBLIC/Ghidra/Extensions/`, keeping the directory name from their zip:
+- Extensions are unzipped into `dist/ghidra_12.2_PUBLIC/Ghidra/Extensions/`, keeping the directory name from their zip:
   - `GhidraMCP/` (`lib/GhidraMCP-<ver>.jar`)
   - `lx-loader/` (`lib/lx-loader.jar`)
   - `dos-toolbox/` (`lib/dos-toolbox.jar`)
@@ -53,7 +55,7 @@ Operational context, invariants and conventions for AI coding agents working in 
 
 ### 2.3 Submodules & Versions
 - Upstream repositories are shallow submodules:
-  - `ghidra` (NSA, tag `Ghidra_12.1.4_build`)
+  - `ghidra` (NSA, tag `Ghidra_12.2_build`)
   - `ghidra-mcp` (bethington/ghidra-mcp, `main`)
   - `lx-loader` (felipe-dos-santos81/ghidra-lx-loader, `fix-object-permissions`): upstream yetmorecode/ghidra-lx-loader `master` plus the object-permissions fix. Pinned to tag `bundle-pin-6fa8cd7` on the fork (earlier pins: `bundle-pin-bce85fd`), so never force-push the branch or delete those tags. Point it back at upstream once that fix is merged there.
   - `dos-toolbox` (plaes/GhidraDosToolbox, `wip-ghidra-12`)
@@ -66,7 +68,7 @@ Operational context, invariants and conventions for AI coding agents working in 
   - `D2GridraTools` (dzik87/D2GridraTools, `main`): **unlicensed**. Fetched only; never modify, commit to or redistribute its files.
 - Sync with `git submodule sync --recursive` then `git submodule update --init --recursive --depth 1` (`make checkout`); the sync carries `.gitmodules` URL changes into existing clones. `distclean` uses `git submodule deinit -f --all`.
 - `GHIDRA_VERSION` in the `Makefile` is the single version pin. Stage 02 fails if it differs from `application.version` in the `ghidra` submodule. `build-ghidra.sh` reads the version from the submodule.
-- All Gradle extensions are built with `ghidra/gradlew ... buildExtension` against the installed Ghidra, so their `extension.properties` carry the installed version.
+- All Gradle extensions are built with `ghidra/gradlew -I scripts/gradle-toolchain.init.gradle -PbundleJavaMajor=$(JAVA_MAJOR) ... buildExtension` against the installed Ghidra. The init script aligns upstream toolchain declarations with the bundle's JDK 25, so `extension.properties` carries the installed version without submodule source edits.
 
 ### 2.4 Python Virtualenv
 - `.venv/` (Python 3.10+) holds `ghidra-mcp` installed in editable mode (`pip install -e ./ghidra-mcp`).
@@ -79,7 +81,7 @@ Operational context, invariants and conventions for AI coding agents working in 
 
 ### 2.6 Packages
 - Every built zip ends up in `dist/packages/`, one per artifact. `install_extension` moves the zip there (deleting older versions and stale same-version builds) and unzips from there; an extension stage skips only when its zip is present in `dist/packages/`.
-- Stage 02 moves Ghidra's zip there and uses `$(call GHIDRA_ZIP,<version>)` (`ghidra_<version>_*_64.zip`), because extension zips also start with `ghidra_<version>_`.
+- Stage 02 uses `$(call GHIDRA_ZIP,<version>)` to select Ghidra's date-suffixed installation zip (`ghidra_<version>_<release>_<yyyymmdd>.zip`) rather than extension zips. Ghidra 12.2 removed the old platform suffix. Legacy installations and packages are not migrated; remove superseded artifacts explicitly.
 
 ### 2.7 PyGhidra
 - `13-pyghidra` creates the venv where `pyghidraRun` looks for it (`scripts/pyghidra-venv-dir.py` asks Ghidra's `pyghidra_launcher`), installs Ghidra's bundled `pyghidra` wheels offline, and installs `python/bundle-mpq` (rebuilt when its source hash changes).
@@ -88,6 +90,7 @@ Operational context, invariants and conventions for AI coding agents working in 
 ### 2.8 REA
 - REA is **not a Ghidra extension**: nothing is installed into `Ghidra/Extensions/`, and `install_extension`, `VerifyExtensions.java` and `dist/packages/` do not apply. It loads its own bridge script through `-scriptPath` into a throwaway read-only project.
 - `.rea/package.json` pins `rea-agents` exactly and the committed `.rea/package-lock.json` pins every transitive package with its hash; the stage installs with `npm ci` and reinstalls when the lockfile changes (its hash is kept in `.rea/node_modules/.bundle-lock`). To bump REA, edit the version in `package.json` and run `npm install --prefix .rea --package-lock-only --ignore-scripts`. Upstream ships breaking releases often (4.0.0 to 6.3.0 in five days). Its Ghidra provider admits Linux arm64 from 6.1.0 and needs the host-native decompiler this source build provides.
+- REA 6.3.0 upstream verifies Ghidra 12.1.4 and accepts only 12.1.x. `scripts/patch-rea-ghidra.py` adds exactly 12.2 as compatible, not upstream-verified; 12.2.1 and other versions remain rejected, and Java bounds still come from `application.properties`. Stage 16 applies the fail-closed, idempotent patch on every eligible run. `tests/test_patch_rea_ghidra.py` covers the transformation and real installed policy; the sanity suite also checks doctor and real decompilation.
 - The stage is optional: without npm and Node.js 22.19+, 24.11+ or 26+, or when `npm ci` fails (no network), it warns and carries on, deleting a `.rea/rea` that no longer runs, and `make test` reports SKIP for the `rea` section.
 - `$(REA_BIN)` = `.rea/rea` is a wrapper written on every run of the stage. It sets `GHIDRA_INSTALL_DIR`, `JAVA_HOME`, `REA_ANALYSIS_PROVIDER=ghidra` and `TMPDIR` (`portable/temp`, where REA keeps each session's project and its copy of the analyzed file) and calls node by absolute path, so both MCP registrations are just `.rea/rea --mcp`. Re-run `make install-rea` after changing Node or the JDK.
 - REA's Ghidra sessions read `launch.properties`, so they write under `portable/` (in `<user>-ghidra/` directories, next to the GUI's `ghidra/`). Never run `rea setup`: it writes skills and registrations into several agent directories under `~`.
@@ -100,7 +103,7 @@ Operational context, invariants and conventions for AI coding agents working in 
 | Stage | Target (alias) | Description |
 | :--- | :--- | :--- |
 | `00` | `00-deps` (`deps`) | Installs missing OS packages (`apt`/`brew`) and `uv` |
-| `00` | `00-env` (`env`) | Checks JDK 21, Maven, Clang, Python 3, uv, Git, curl, GNU `timeout` (`gtimeout` on macOS); warns when the optional StormLib or Node.js is missing |
+| `00` | `00-env` (`env`) | Checks JDK 25, Maven, Clang, Python 3, uv, Git, curl, GNU `timeout` (`gtimeout` on macOS); warns when the optional StormLib or Node.js is missing |
 | `01` | `01-checkout` (`checkout`) | Fetches submodules (`--depth 1`) |
 | `02` | `02-build-ghidra` (`build-ghidra`) | Checks the version pin, runs `build-ghidra.sh` |
 | `03` | `03-install-ghidra` (`install-ghidra`) | Extracts the zip to `dist/`, patches `launch.properties` |
@@ -117,7 +120,7 @@ Operational context, invariants and conventions for AI coding agents working in 
 | `13` | `13-pyghidra` (`pyghidra`) | Sets up PyGhidra's venv in `portable/` with `bundle_mpq` |
 | `14` | `14-venv` (`venv`) | Creates `.venv` and installs `bridge-mcp-ghidra` |
 | `15` | `15-register-mcp` (`register-mcp`) | Registers `ghidra` with opencode (atomic JSON write; a config that is not plain JSON, such as JSONC, is left unchanged with a warning) and Claude Code (`claude mcp add --scope user`, skipped if `claude` is absent), through the `register_mcp` macro |
-| `16` | `16-install-rea` (`install-rea`) | Installs REA into `.rea/` from its lockfile (`npm ci`), writes the `.rea/rea` wrapper and registers `rea` (`register_mcp`); warns and skips without a suitable Node.js or when npm fails |
+| `16` | `16-install-rea` (`install-rea`) | Installs REA 6.3.0 from its lockfile (`npm ci`), applies the Ghidra 12.2 compatibility patch, writes the `.rea/rea` wrapper and registers `rea` (`register_mcp`); warns and skips without suitable Node.js or when npm fails |
 | — | `test` | Sanity suite (`tests/run-sanity.sh`), in sections: `extensions`, `fixtures` (ELF/DOS/LE via `SanityCheck.java`), `mcp` (GhidraMCP over HTTP on `TEST_MCP_PORT`, 18089), `dist`, `binexport`, `portable`, `jython`, `pyghidra`, `rea`. `SANITY_ONLY=dist,pyghidra make test` runs a subset |
 
 Runtime and maintenance: `install` (runs `$(PIPELINE)`, all of the above, with `verify-extensions` after stage 12 so a broken extension stops the install before MCP registration, ending with `test`), `run`, `run-bridge`, `verify` (probes `http://127.0.0.1:8089/check_connection`), `clean`, `distclean`.
@@ -133,7 +136,7 @@ Runtime and maintenance: `install` (runs `$(PIPELINE)`, all of the above, with `
    - Print messages with the `$(OK)`, `$(WARN)` and `$(ERR)` helpers (ANSI via `printf`).
    - Add new extensions through `$(call install_extension,dir,src,zip glob[,legacy dir][,gradle subdir])`, add a check to `VerifyExtensions.java`, and add a `PACKAGE_PATTERNS` and `BUILD_OUTPUTS` entry in `tests/run-sanity.sh`.
    - Give every user-facing target a `## description`; `make help` lists those.
-2. **Bash scripts:** use `set -euo pipefail` and validate with `bash -n <script>`. `build-ghidra.sh` expects `JAVA_HOME` (JDK 21) from the Makefile.
+2. **Bash scripts:** use `set -euo pipefail` and validate with `bash -n <script>`. `build-ghidra.sh` expects `JAVA_HOME` (JDK 25) from the Makefile.
 3. **Before merging:**
    - `make help` renders cleanly.
    - `make env` passes.
