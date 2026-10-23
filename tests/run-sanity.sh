@@ -262,6 +262,56 @@ print(names["compute"] if {"compute", "helper"} <= names.keys() else "")
     fail "GhidraMCP: /decompile_function compute (got ${out:0:200})"
   fi
 
+  out=$(curl -sf -m 30 -X POST -H 'Content-Type: application/json' \
+    -d '{"name":"SanityDel","fields":[{"name":"a","type":"char"}]}' \
+    "$url/create_struct" || true)
+  if [[ "$out" == *'"status":"success"'* ]]; then
+    pass "GhidraMCP: /create_struct SanityDel"
+  else
+    fail "GhidraMCP: /create_struct SanityDel (got ${out:0:200})"
+    stop_mcp
+    return
+  fi
+
+  out=$(curl -sf -m 30 -X POST -H 'Content-Type: application/json' \
+    -d '{"name":"SanityDel","fields":[{"name":"a","type":"int"},{"name":"b","type":"char"}]}' \
+    "$url/recreate_struct" || true)
+  if [[ "$out" == *'"status":"success"'* ]]; then
+    pass "GhidraMCP: /recreate_struct replaces one-byte stub"
+  else
+    fail "GhidraMCP: /recreate_struct one-byte stub (got ${out:0:200})"
+    stop_mcp
+    return
+  fi
+
+  out=$(curl -sf -m 30 -X POST -H 'Content-Type: application/json' \
+    -d '{"name":"SanityDel","fields":[{"name":"a","type":"long"}],"force":true}' \
+    "$url/recreate_struct" || true)
+  if [[ "$out" == *'"status":"success"'* ]]; then
+    pass "GhidraMCP: /recreate_struct force"
+  else
+    fail "GhidraMCP: /recreate_struct force (got ${out:0:200})"
+    stop_mcp
+    return
+  fi
+
+  out=$(curl -sf -m 30 -X POST -H 'Content-Type: application/json' \
+    -d '{"type_name":"SanityDel"}' "$url/delete_data_type" || true)
+  if [[ "$out" == *'"status":"success"'* ]]; then
+    pass "GhidraMCP: /delete_data_type SanityDel"
+  else
+    fail "GhidraMCP: /delete_data_type SanityDel (got ${out:0:200})"
+    stop_mcp
+    return
+  fi
+
+  out=$(curl -sf -m 30 "$url/get_type_size?type_name=SanityDel" || true)
+  if [[ "$out" == *"Data type not found"* ]]; then
+    pass "GhidraMCP: deleted type is absent"
+  else
+    fail "GhidraMCP: /get_type_size confirms deletion (got ${out:0:200})"
+  fi
+
   stop_mcp
 }
 

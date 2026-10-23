@@ -20,6 +20,18 @@ INSTALL_DIR := $(DIST_DIR)/ghidra_$(GHIDRA_VERSION)_PUBLIC
 PORTABLE_DIR := $(INSTALL_DIR)/portable
 LAUNCH_PROPS := $(INSTALL_DIR)/support/launch.properties
 EXT_DIR := $(INSTALL_DIR)/Ghidra/Extensions
+MCP_BUILD_DIR := $(DIST_DIR)/build/ghidra-mcp
+MCP_PATCH_ID = ghidra-mcp-$(shell git hash-object scripts/prepare-extension-source.py)
+LX_BUILD_DIR := $(DIST_DIR)/build/lx-loader
+LX_PATCH_ID = lx-loader-$(shell git hash-object scripts/prepare-extension-source.py)
+DOS_TOOLBOX_BUILD_DIR := $(DIST_DIR)/build/dos-toolbox
+DOS_TOOLBOX_PATCH_ID = dos-toolbox-$(shell git hash-object scripts/prepare-extension-source.py)
+GHIDRASSIST_BUILD_DIR := $(DIST_DIR)/build/GhidrAssist
+GHIDRASSIST_PATCH_ID = ghidrassist-$(shell git hash-object scripts/prepare-extension-source.py)
+REVENG_BUILD_DIR := $(DIST_DIR)/build/plugin-ghidra
+REVENG_PATCH_ID = plugin-ghidra-$(shell git hash-object scripts/prepare-extension-source.py)
+FINDCRYPT_BUILD_DIR := $(DIST_DIR)/build/GhidraFindcrypt
+FINDCRYPT_PATCH_ID = ghidrafindcrypt-$(shell git hash-object scripts/prepare-extension-source.py)
 VENV_DIR := $(BUNDLE_DIR)/.venv
 BRIDGE_BIN := $(VENV_DIR)/bin/bridge-mcp-ghidra
 OPENCODE_CONFIG := $(HOME)/.config/opencode/opencode.json
@@ -194,20 +206,21 @@ install-ghidra: 03-install-ghidra
 
 # ── Stages 4–13: Extensions, scripts and PyGhidra ─────────────────────────────
 
-# $(call install_extension,directory,source dir,zip glob[,legacy directory to remove][,gradle subdir])
+# $(call install_extension,directory,source dir,zip glob[,legacy directory to remove][,gradle subdir][,commit dir][,patch identity])
 # Builds an extension with ghidra/gradlew (in <source dir>/<gradle subdir>), moves the
 # zip into $(PACKAGES_DIR) and unzips it into $(EXT_DIR). The zip glob names the build
 # output and contains $(GHIDRA_VERSION); older versions of that zip in $(PACKAGES_DIR)
 # and stale builds left in the build folder are deleted. The source commit is recorded
-# in <ext>/.bundle-source; the stage rebuilds when it changes or when the zip is
-# missing from $(PACKAGES_DIR).
+# in <ext>/.bundle-source and any patch identity in <ext>/.bundle-patch; the stage
+# rebuilds when either changes or when the zip is missing from $(PACKAGES_DIR).
 # Never rename the unzipped directory: Ghidra only loads classes from
 # <ext>/lib/<jar> when the jar name starts with the directory name, so a
 # renamed extension silently loses its loaders, analyzers and plugins.
 define install_extension
-@SRC=$$(git -C $(2) rev-parse HEAD 2>/dev/null); \
+@SRC=$$(git -C $(or $(6),$(2)) rev-parse HEAD 2>/dev/null); \
 if [ -d "$(EXT_DIR)/$(1)" ] && compgen -G "$(PACKAGES_DIR)/$(notdir $(3))" >/dev/null && \
-	{ [ -z "$$SRC" ] || [ "$$(cat "$(EXT_DIR)/$(1)/.bundle-source" 2>/dev/null)" = "$$SRC" ]; }; then \
+	{ [ -z "$$SRC" ] || [ "$$(cat "$(EXT_DIR)/$(1)/.bundle-source" 2>/dev/null)" = "$$SRC" ]; } && \
+	{ [ -z "$(7)" ] || [ "$$(cat "$(EXT_DIR)/$(1)/.bundle-patch" 2>/dev/null)" = "$(7)" ]; }; then \
 	echo "$(1) already installed$${SRC:+ from $${SRC:0:7}}, skipping."; \
 else \
 	echo "Building $(1)$${SRC:+ from $${SRC:0:7}}..."; \
@@ -224,30 +237,43 @@ else \
 	unzip -q -o "$$ZIP" -d "$(EXT_DIR)" || exit 1; \
 	[ -d "$(EXT_DIR)/$(1)" ] || { $(ERR) "$$ZIP did not create $(EXT_DIR)/$(1)"; exit 1; }; \
 	[ -z "$$SRC" ] || echo "$$SRC" > "$(EXT_DIR)/$(1)/.bundle-source"; \
+	{ [ -z "$(7)" ] || echo "$(7)" > "$(EXT_DIR)/$(1)/.bundle-patch"; } || exit 1; \
 	$(OK) "$(1) installed ($${ZIP##*/} in $(PACKAGES_DIR))."; \
 fi
 endef
 
 04-install-mcp: 03-install-ghidra ## Build and install the GhidraMCP extension
-	$(call install_extension,GhidraMCP,ghidra-mcp,ghidra-mcp/build/distributions/GhidraMCP-*.zip)
+	@python3 -I scripts/prepare-extension-source.py ghidra-mcp \
+		ghidra-mcp "$(MCP_BUILD_DIR)" "$(GHIDRA_VERSION)" || exit 1;
+	$(call install_extension,GhidraMCP,$(MCP_BUILD_DIR),$(MCP_BUILD_DIR)/build/distributions/GhidraMCP-*.zip,,,ghidra-mcp,$(MCP_PATCH_ID))
 
 05-install-lx-loader: 03-install-ghidra ## Build and install the lx-loader extension
-	$(call install_extension,lx-loader,lx-loader,lx-loader/dist/ghidra_$(GHIDRA_VERSION)_*_lx-loader.zip,ghidra-lx-loader)
+	@python3 -I scripts/prepare-extension-source.py lx-loader \
+		lx-loader "$(LX_BUILD_DIR)" "$(GHIDRA_VERSION)" || exit 1;
+	$(call install_extension,lx-loader,$(LX_BUILD_DIR),$(LX_BUILD_DIR)/dist/ghidra_$(GHIDRA_VERSION)_*_lx-loader.zip,ghidra-lx-loader,,lx-loader,$(LX_PATCH_ID))
 
 06-install-dos-toolbox: 03-install-ghidra ## Build and install the GhidraDosToolbox extension
-	$(call install_extension,dos-toolbox,dos-toolbox,dos-toolbox/dist/ghidra_$(GHIDRA_VERSION)_*_dos-toolbox.zip,GhidraDosToolbox)
+	@python3 -I scripts/prepare-extension-source.py dos-toolbox \
+		dos-toolbox "$(DOS_TOOLBOX_BUILD_DIR)" "$(GHIDRA_VERSION)" || exit 1;
+	$(call install_extension,dos-toolbox,$(DOS_TOOLBOX_BUILD_DIR),$(DOS_TOOLBOX_BUILD_DIR)/dist/ghidra_$(GHIDRA_VERSION)_*_dos-toolbox.zip,GhidraDosToolbox,,dos-toolbox,$(DOS_TOOLBOX_PATCH_ID))
 
 07-install-ghidrassist: 03-install-ghidra ## Build and install GhidrAssist (LLM assistant; unconfigured)
-	$(call install_extension,GhidrAssist,GhidrAssist,GhidrAssist/dist/ghidra_$(GHIDRA_VERSION)_*_GhidrAssist.zip)
+	@python3 -I scripts/prepare-extension-source.py ghidrassist \
+		GhidrAssist "$(GHIDRASSIST_BUILD_DIR)" "$(GHIDRA_VERSION)" || exit 1;
+	$(call install_extension,GhidrAssist,$(GHIDRASSIST_BUILD_DIR),$(GHIDRASSIST_BUILD_DIR)/dist/ghidra_$(GHIDRA_VERSION)_*_GhidrAssist.zip,,,GhidrAssist,$(GHIDRASSIST_PATCH_ID))
 
 08-install-reveng: 03-install-ghidra ## Build and install the RevEng.AI plugin (cloud; unconfigured)
-	$(call install_extension,plugin-ghidra,plugin-ghidra,plugin-ghidra/dist/ghidra_$(GHIDRA_VERSION)_*_plugin-ghidra.zip)
+	@python3 -I scripts/prepare-extension-source.py plugin-ghidra \
+		plugin-ghidra "$(REVENG_BUILD_DIR)" "$(GHIDRA_VERSION)" || exit 1;
+	$(call install_extension,plugin-ghidra,$(REVENG_BUILD_DIR),$(REVENG_BUILD_DIR)/dist/ghidra_$(GHIDRA_VERSION)_*_plugin-ghidra.zip,,,plugin-ghidra,$(REVENG_PATCH_ID))
 
 09-install-retsync: 03-install-ghidra ## Build and install ret-sync (sync with x64dbg/WinDbg)
 	$(call install_extension,retsync,ret-sync,ret-sync/ext_ghidra/dist/ghidra_$(GHIDRA_VERSION)_*_retsync.zip,,ext_ghidra)
 
 10-install-findcrypt: 03-install-ghidra ## Build and install GhidraFindcrypt (crypto constants)
-	$(call install_extension,GhidraFindcrypt,GhidraFindcrypt,GhidraFindcrypt/dist/ghidra_$(GHIDRA_VERSION)_*_GhidraFindcrypt.zip)
+	@python3 -I scripts/prepare-extension-source.py ghidrafindcrypt \
+		GhidraFindcrypt "$(FINDCRYPT_BUILD_DIR)" "$(GHIDRA_VERSION)" || exit 1;
+	$(call install_extension,GhidraFindcrypt,$(FINDCRYPT_BUILD_DIR),$(FINDCRYPT_BUILD_DIR)/dist/ghidra_$(GHIDRA_VERSION)_*_GhidraFindcrypt.zip,,,GhidraFindcrypt,$(FINDCRYPT_PATCH_ID))
 
 11-install-binexport: 03-install-ghidra ## Build and install BinExport (exports for BinDiff)
 	$(call install_extension,BinExport,binexport,binexport/java/dist/ghidra_$(GHIDRA_VERSION)_*_BinExport.zip,,java)
