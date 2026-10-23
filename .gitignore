@@ -18,6 +18,7 @@ Thumbs.db
 test_*.sh
 *.tmp
 scratch/
+.worktrees/
 
 # pip's in-tree build of python/bundle-mpq
 python/bundle-mpq/build/
