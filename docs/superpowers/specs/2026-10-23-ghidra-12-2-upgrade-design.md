@@ -81,7 +81,10 @@ than silently expanding scope.
 - Resolve JDK 25 through `JAVA25_HOME`, macOS `java_home`, the existing Linux
   search strategy updated for 25, or `javac` on `PATH`.
 - Install `temurin@25` through Homebrew or `openjdk-25-jdk` through apt when
-  missing, matching the existing dependency-stage behavior.
+  missing, matching the existing dependency-stage behavior. On an apt-based
+  distribution that does not offer `openjdk-25-jdk`, the user instead installs a
+  full JDK 25 in advance and sets `JAVA25_HOME`; stage 00 then skips that package.
+  No additional package repository is introduced.
 - Update `build-ghidra.sh`, stage `00-env`, portable `JAVA_HOME_OVERRIDE`, REA's
   generated wrapper and test-script usage text to require/use JDK 25.
 
@@ -117,7 +120,9 @@ The patch has narrow semantics:
   existing behavior.
 - The exact bundle version `12.2` becomes an additional **compatible**, not
   **verified**, release. REA therefore continues to report its upstream
-  verification limitation for this build.
+  verification limitation for this build. A future `12.2.1` remains rejected
+  until the patch and its tests are deliberately updated; patch releases are not
+  accepted automatically.
 - User-facing accepted-release and limitation text includes both 12.1.x and
   12.2 rather than claiming that only 12.1.x is accepted.
 - Java admission continues to come from each installation's

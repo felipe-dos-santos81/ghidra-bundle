@@ -13,9 +13,9 @@
 ## Global Constraints
 
 - Pin `ghidra` to `Ghidra_12.2_build`, commit `8ca9077040cc43cd790babcfccf19475622a3e9a`; set `GHIDRA_VERSION := 12.2` and `JAVA_MAJOR := 25`.
-- Replace `JAVA21_HOME` with `JAVA25_HOME`; the Makefile continues to export the selected JDK as `JAVA_HOME`.
+- Replace `JAVA21_HOME` with `JAVA25_HOME`; the Makefile continues to export the selected JDK as `JAVA_HOME`. On apt systems without `openjdk-25-jdk`, require a preinstalled full JDK 25 through `JAVA25_HOME` rather than adding a package repository.
 - Keep `rea-agents` exactly `6.3.0` and leave `.rea/package.json` and `.rea/package-lock.json` unchanged.
-- Ghidra 12.2 is an additional REA **compatible**, never **verified**, release. Ghidra 12.1.x behavior and Java admission through `application.java.min`/`application.java.max` stay intact.
+- Ghidra 12.2 is an additional REA **compatible**, never **verified**, release. Ghidra 12.1.x behavior and Java admission through `application.java.min`/`application.java.max` stay intact. The patch accepts exactly `12.2`; `12.2.1` and other versions remain rejected.
 - Do not edit any third-party submodule source file. If compilation requires such an edit, stop and request a design revision.
 - Do not migrate or delete `dist/ghidra_12.1.4_PUBLIC/`, user projects or user settings.
 - Preserve portable mode: Ghidra, extensions, PyGhidra and REA write settings, caches and temporary state only below the active install's `portable/`.
@@ -152,6 +152,21 @@ class ReaPolicyPatchTest(unittest.TestCase):
             patch_package(root, "12.2")
         self.assertEqual(partial, policy_path.read_text(encoding="utf-8"))
 
+    def test_real_installed_policy_when_available(self):
+        policy_path = (
+            Path(__file__).resolve().parents[1]
+            / ".rea" / "node_modules" / "rea-agents" / "dist" / "ghidra"
+            / "GhidraInstallationPolicy.js"
+        )
+        if not policy_path.is_file():
+            self.skipTest("rea-agents is not installed")
+        original = policy_path.read_text(encoding="utf-8")
+        patched = patch_policy(original, "12.2")
+        self.assertIn('export const SUPPORTED_GHIDRA_VERSION = "12.1.4";', patched)
+        self.assertIn("sameVerifiedLine || raw === BUNDLE_GHIDRA_VERSION", patched)
+        self.assertIn(".x or ${BUNDLE_GHIDRA_VERSION}`", patched)
+        self.assertEqual(patched, patch_policy(patched, "12.2"))
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -282,7 +297,7 @@ for name in ("scripts/patch-rea-ghidra.py", "tests/test_patch_rea_ghidra.py"):
 PY
 ```
 
-Expected: five tests PASS and the syntax check exits 0.
+Expected: six tests PASS on this checkout and the syntax check exits 0. The real-policy test reports SKIP only when `.rea/node_modules/rea-agents` is absent.
 
 - [ ] **Step 5: Commit the independently tested patch**
 
@@ -399,7 +414,14 @@ In `Makefile`, immediately after `GHIDRA_VERSION`, add:
 JAVA_MAJOR := 25
 ```
 
-In `install_extension`, replace the Gradle subshell with:
+The current `install_extension` Gradle subshell is:
+
+```make
+	(cd "$(2)/$(or $(5),.)" && "$(BUNDLE_DIR)/ghidra/gradlew" -p . \
+		-PGHIDRA_INSTALL_DIR="$(INSTALL_DIR)" buildExtension) || exit 1; \
+```
+
+Replace it with:
 
 ```make
 	(cd "$(2)/$(or $(5),.)" && "$(BUNDLE_DIR)/ghidra/gradlew" -p . \
@@ -408,9 +430,9 @@ In `install_extension`, replace the Gradle subshell with:
 		-PGHIDRA_INSTALL_DIR="$(INSTALL_DIR)" buildExtension) || exit 1; \
 ```
 
-This snippet is a plan representation; the Makefile recipe line must begin with a literal tab, and continuation lines must retain tabs as in the surrounding macro.
+The Makefile recipe line must begin with a literal tab, and continuation lines must retain tabs as in the surrounding macro.
 
-Run:
+Run the expansion checks:
 
 ```bash
 make -n install-mcp | grep -F -- '-PbundleJavaMajor=25'
@@ -419,10 +441,31 @@ make -n install-mcp | grep -F -- 'scripts/gradle-toolchain.init.gradle'
 
 Expected: each command prints the matching expanded build argument.
 
-Remove only the generated probe:
+Exercise the two real projects that declare Java 21 toolchains. These are compile-only probes against the current 12.1.4 install: they do not install extensions or edit submodule sources, and Task 3/4 later builds and installs them against 12.2.
+
+```bash
+export JAVA_HOME="$(printf 'print-java-home: ; @echo $(JAVA21_HOME)\n' | make -s -f Makefile -f - print-java-home)"
+export PATH="$JAVA_HOME/bin:$PATH"
+ghidra/gradlew -p "$PWD/ghidra-mcp" \
+  -I "$PWD/scripts/gradle-toolchain.init.gradle" \
+  -PbundleJavaMajor=25 \
+  -PGHIDRA_INSTALL_DIR="$PWD/dist/ghidra_12.1.4_PUBLIC" \
+  buildExtension --console=plain
+ghidra/gradlew -p "$PWD/binexport/java" \
+  -I "$PWD/scripts/gradle-toolchain.init.gradle" \
+  -PbundleJavaMajor=25 \
+  -PGHIDRA_INSTALL_DIR="$PWD/dist/ghidra_12.1.4_PUBLIC" \
+  buildExtension --console=plain
+```
+
+Expected: both real builds report `BUILD SUCCESSFUL` with the override active. A `value is final and cannot be changed` error would mean the project finalizes its toolchain before `projectsEvaluated`; stop and revise the override rather than proceeding to the full pipeline.
+
+Remove the generated probe and probe-only archives so the later dist checks see only pipeline artifacts:
 
 ```bash
 rm -rf dist/toolchain-probe
+rm -f ghidra-mcp/build/distributions/GhidraMCP-*.zip
+rm -f binexport/java/dist/ghidra_12.1.4_*_BinExport.zip
 ```
 
 - [ ] **Step 6: Commit the toolchain override**
@@ -450,15 +493,15 @@ git commit -m "build: align extension Java toolchains"
 
 - [ ] **Step 1: Confirm the old version fails the new expectation**
 
-Run:
+Use a stdin makefile fragment rather than `--eval`, which macOS's GNU Make 3.81 does not support:
 
 ```bash
-test "$(make -s --eval 'print-version: ; @echo $(GHIDRA_VERSION)' print-version)" = "12.2"
+test "$(printf 'print-version: ; @echo $(GHIDRA_VERSION)\n' | make -s -f Makefile -f - print-version)" = "12.2"
 ```
 
-Expected now: FAIL because the value is `12.1.4`. This check must succeed after the Makefile edit.
+Expected now: FAIL because the value is `12.1.4`, not because of an unsupported make option. This check must succeed after the Makefile edit.
 
-- [ ] **Step 2: Pin the confirmed Ghidra tag**
+- [ ] **Step 2: Pin and commit the confirmed Ghidra tag**
 
 Run:
 
@@ -466,9 +509,11 @@ Run:
 git -C ghidra fetch --depth 1 origin tag Ghidra_12.2_build
 git -C ghidra checkout 8ca9077040cc43cd790babcfccf19475622a3e9a
 sed -n 's/^application\.version=//p' ghidra/Ghidra/application.properties
+git add ghidra
+git commit -m "build: pin Ghidra submodule to 12.2"
 ```
 
-Expected: `12.2`. Do not edit any file inside the submodule.
+Expected: the version print is `12.2` and the gitlink is committed immediately. Do not edit any file inside the submodule. The immediate commit is required before any Make target that depends on `01-checkout`; otherwise `git submodule update` restores the superproject's old 12.1.4 gitlink before stage 02 checks the version.
 
 - [ ] **Step 3: Migrate Makefile version and JDK selection**
 
@@ -477,6 +522,7 @@ Use exact replacements in `Makefile`:
 - Replace `GHIDRA_VERSION := 12.1.4` with `GHIDRA_VERSION := 12.2`.
 - Replace every `JAVA21_HOME` with `JAVA25_HOME`.
 - Replace every `JDK 21` with `JDK 25`.
+- In `/usr/libexec/java_home -F -v 21`, replace `-v 21` with `-v 25`.
 - Replace `temurin@21` with `temurin@25`.
 - Replace `openjdk-21-jdk` with `openjdk-25-jdk`.
 - In the Linux search glob only, replace `/usr/lib/jvm/*21*` with `/usr/lib/jvm/*25*`.
@@ -489,14 +535,24 @@ export JAVA_HOME := $(JAVA25_HOME)
 export PATH := $(JAVA25_HOME)/bin:$(HOME)/.local/bin:$(HOME)/.cargo/bin:$(PATH)
 ```
 
-Confirm the version check now succeeds:
+Add this check to `00-env` immediately after the existing `JAVA25_HOME` directory check and before its `$(TICK)` line:
 
-```bash
-test "$(make -s --eval 'print-version: ; @echo $(GHIDRA_VERSION)' print-version)" = "12.2"
-test "$(make -s --eval 'print-java: ; @echo $(JAVA_MAJOR)' print-java)" = "25"
+```make
+	@"$(JAVA25_HOME)/bin/java" -version 2>&1 | grep -q 'version "$(JAVA_MAJOR)' || \
+		{ $(ERR) "JAVA25_HOME is not a JDK $(JAVA_MAJOR) install: $(JAVA25_HOME)"; exit 1; }
 ```
 
-Expected: both commands exit 0.
+This makes `make env` reject a directory that exists but contains the wrong JDK major. Use a literal recipe tab.
+
+Confirm the version checks and the post-edit literal sweep:
+
+```bash
+test "$(printf 'print-version: ; @echo $(GHIDRA_VERSION)\n' | make -s -f Makefile -f - print-version)" = "12.2"
+test "$(printf 'print-java: ; @echo $(JAVA_MAJOR)\n' | make -s -f Makefile -f - print-java)" = "25"
+! grep -nE -- '-v 21|version "21|\*21\*|temurin@21|openjdk-21|JDK 21|JAVA21_HOME' Makefile
+```
+
+Expected: the two tests exit 0 and the grep prints nothing (its no-match status is inverted).
 
 - [ ] **Step 4: Require JDK 25 in the source-build script**
 
@@ -508,6 +564,8 @@ if [[ -z "${JAVA_HOME:-}" ]] || ! "$JAVA_HOME/bin/java" -version 2>&1 | grep -q 
   exit 1
 fi
 ```
+
+Precondition: JDK 25 is already installed on this host. On a fresh host, run `make deps` after the Makefile edit; on an apt distribution without `openjdk-25-jdk`, install a full JDK 25 through another trusted package and export `JAVA25_HOME` before running `make deps` or `make env`.
 
 Run:
 
@@ -559,22 +617,24 @@ Run:
 ```bash
 bash -n tests/run-sanity.sh
 make -n install >/dev/null
+! grep -nE -- '-v 21|version "21|\*21\*|temurin@21|openjdk-21|JDK 21|JAVA21_HOME' \
+  Makefile build-ghidra.sh tests/run-sanity.sh
 ```
 
-Expected: both commands succeed.
+Expected: both build checks succeed and the version-literal grep prints nothing.
 
 - [ ] **Step 6: Refresh source dependencies and build/install Ghidra 12.2**
 
-Run:
+Run the dependency fetch explicitly even when `dependencies/flatRepo` already exists so changed 12.2 dependencies are refreshed without deleting the old installation or dependency cache. Use the portable stdin-makefile form to resolve the selected JDK.
 
 ```bash
-export JAVA_HOME="$(make -s --eval 'print-java-home: ; @echo $(JAVA25_HOME)' print-java-home)"
+export JAVA_HOME="$(printf 'print-java-home: ; @echo $(JAVA25_HOME)\n' | make -s -f Makefile -f - print-java-home)"
 export PATH="$JAVA_HOME/bin:$PATH"
 (cd ghidra && ./gradlew -I gradle/support/fetchDependencies.gradle --console=plain)
 make install-ghidra
 ```
 
-Expected: dependency fetch and source build succeed, `dist/packages/` contains one Ghidra 12.2 platform zip, and stage 03 creates `dist/ghidra_12.2_PUBLIC/` with portable paths pointing to JDK 25.
+Expected: dependency fetch and source build succeed, `dist/packages/` contains one Ghidra 12.2 platform zip, and stage 03 creates `dist/ghidra_12.2_PUBLIC/` with portable paths pointing to JDK 25. The `01-checkout` dependency retains the 12.2 commit already committed in Step 2.
 
 Confirm:
 
@@ -589,9 +649,11 @@ Expected: the first three commands confirm 12.2/JDK 25; the last fails at the ex
 
 - [ ] **Step 7: Commit the core migration**
 
+The gitlink is already committed. Commit only the remaining core files:
+
 ```bash
-git add ghidra Makefile build-ghidra.sh tests/run-sanity.sh
-git commit -m "build: upgrade Ghidra to 12.2 and JDK 25"
+git add Makefile build-ghidra.sh tests/run-sanity.sh
+git commit -m "build: require JDK 25 for Ghidra 12.2"
 ```
 
 ---
@@ -671,7 +733,7 @@ make install-rea
 SANITY_ONLY=rea make test
 ```
 
-Expected: five unit tests pass; the first stage-16 invocation reports `patched` and the second reports `already patched`; `REA: doctor accepts this install's Ghidra and JDK` and `REA: decompiles the DOS MZ fixture through Ghidra` both PASS. No REA SKIP is accepted on this machine.
+Expected: all six unit tests pass, including the real installed policy; the first stage-16 invocation reports `patched` and the second reports `already patched`; `REA: doctor accepts this install's Ghidra and JDK` and `REA: decompiles the DOS MZ fixture through Ghidra` both PASS. No REA SKIP is accepted on this machine.
 
 - [ ] **Step 5: Build and test the complete bundle**
 
@@ -714,7 +776,7 @@ In `README.md` and `AGENTS.md`, use exact replacements for current-version refer
 - Replace every `JDK 21` with `JDK 25`.
 - In `AGENTS.md`, replace `<JAVA21_HOME>` with `<JAVA25_HOME>`.
 
-Do not edit files under `docs/superpowers/specs/` other than this upgrade's spec, and do not edit earlier implementation plans.
+Complete these replacements before inserting the new REA text below; those paragraphs intentionally retain `12.1.4` when describing REA's upstream verification. Do not edit files under `docs/superpowers/specs/` other than this upgrade's spec, and do not edit earlier implementation plans.
 
 In `AGENTS.md`, replace the extension-build invariant with:
 
@@ -725,7 +787,7 @@ In `AGENTS.md`, replace the extension-build invariant with:
 In `AGENTS.md`, add this REA invariant immediately after the lockfile/pin bullet:
 
 ```markdown
-- REA 6.3.0 upstream verifies Ghidra 12.1.4 and accepts only 12.1.x. `scripts/patch-rea-ghidra.py` validates that exact package and adds Ghidra 12.2 as compatible but not upstream-verified; it does not bypass Java bounds read from `application.properties`. Stage 16 applies the idempotent patch on every eligible run and fails on unexpected package versions or policy source. `tests/test_patch_rea_ghidra.py` covers the transformation, while `make test` checks doctor and real decompilation.
+- REA 6.3.0 upstream verifies Ghidra 12.1.4 and accepts only 12.1.x. `scripts/patch-rea-ghidra.py` validates that exact package and adds Ghidra 12.2 as compatible but not upstream-verified; it does not bypass Java bounds read from `application.properties`. Exactly 12.2 is accepted: 12.2.1 and other versions remain rejected until a deliberate patch update. Stage 16 applies the idempotent patch on every eligible run and fails on unexpected package versions or policy source. `tests/test_patch_rea_ghidra.py` covers the transformation and the real installed policy, while `make test` checks doctor and real decompilation.
 ```
 
 Update the stage-16 row in `AGENTS.md` so its description reads:
@@ -737,7 +799,13 @@ Update the stage-16 row in `AGENTS.md` so its description reads:
 In `README.md`, add this paragraph to the REA section after the introductory REA paragraph:
 
 ```markdown
-REA 6.3.0 upstream verifies Ghidra 12.1.4 and accepts only 12.1.x. The bundle applies a checked, idempotent patch to its installed policy so Ghidra 12.2 is accepted as compatible but not upstream-verified; Java requirements still come from Ghidra's own `application.properties`. The sanity suite runs both REA doctor and a real decompilation to validate this integration.
+REA 6.3.0 upstream verifies Ghidra 12.1.4 and accepts only 12.1.x. The bundle applies a checked, idempotent patch to its installed policy so exactly Ghidra 12.2 is accepted as compatible but not upstream-verified; 12.2.1 and other versions remain rejected. Java requirements still come from Ghidra's own `application.properties`. The sanity suite runs both REA doctor and a real decompilation to validate this integration.
+```
+
+In `README.md`, add this paragraph immediately after the Quickstart prerequisite paragraph and before `## Using the MCP server`:
+
+```markdown
+On apt-based Linux distributions, `make deps` installs `openjdk-25-jdk` when available. If your distribution does not provide that package, install a full JDK 25 yourself and export `JAVA25_HOME=/absolute/path/to/jdk` before running `make deps` or `make install`; the dependency stage then leaves that package out. No additional package repository is required.
 ```
 
 - [ ] **Step 2: Review real snapshot changes before recording them**
