@@ -6,8 +6,8 @@
 # Env:   UPDATE_SNAPSHOTS=1  rewrite tests/snapshots/ from this run
 #        TEST_MCP_PORT=18089  port for the GhidraMCP test server (default 18089)
 #        TEST_IMPORT_TIMEOUT=600  seconds before a fixture import is killed (default 600)
-#        SANITY_ONLY=dist,jython  run only these sections: extensions, fixtures, mcp,
-#                                 dist, binexport, portable, jython, pyghidra, rea
+#        SANITY_ONLY=dist,jython  run only these sections: env, extensions, fixtures,
+#                                 mcp, dist, binexport, portable, jython, pyghidra, rea
 #        PACKAGES_DIR=<dir>       built zips to check (default: <install dir>/../packages)
 #        REA_BIN=<file>           REA wrapper written by `make install-rea` (default: <repo>/.rea/rea)
 # Needs GNU timeout (Linux: coreutils; macOS: `brew install coreutils` for gtimeout).
@@ -33,7 +33,7 @@ indent() { sed 's/^/    /'; }
 fail_with_log() { fail "$1"; tail -20 "$2" | indent; }  # fail_with_log <message> <log file>
 
 # want <section>: true when SANITY_ONLY is unset or lists <section> (comma-separated).
-SECTIONS=",extensions,fixtures,mcp,dist,binexport,portable,jython,pyghidra,rea,"
+SECTIONS=",env,extensions,fixtures,mcp,dist,binexport,portable,jython,pyghidra,rea,"
 want() { [[ -z "${SANITY_ONLY:-}" || ",$SANITY_ONLY," == *",$1,"* ]]; }
 SANITY_ONLY=${SANITY_ONLY:-}
 for section in ${SANITY_ONLY//,/ }; do
@@ -109,6 +109,36 @@ LEAKS_BEFORE=$'\n'
 for leak in "${LEAK_PATHS[@]}"; do
   if [[ -e "$leak" ]]; then LEAKS_BEFORE+="$leak"$'\n'; fi
 done
+
+# ── 0. Headless-only JDK detection ────────────────────────────────────────────
+# Ghidra's GUI exits immediately on a headless-only JDK (no libawt_xawt.so), and
+# ghidraRun hides the reason. check-jdk-gui must reject it with an actionable message.
+check_jdk_gui() {
+  local fake="$WORK/fake-jdk" install="$WORK/fake-install" out
+  mkdir -p "$fake/lib" "$install/support"
+  printf 'JAVA_HOME_OVERRIDE=%s\n' "$fake" > "$install/support/launch.properties"
+  if [[ "$(uname -s)" == Linux ]]; then
+    if out=$(make -s -C "$REPO_DIR" check-jdk-gui INSTALL_DIR="$install" 2>&1); then
+      fail "jdk: check-jdk-gui accepted a headless-only JDK"
+    elif [[ "$out" == *"cannot open a GUI"* && "$out" == *"$fake"* ]]; then
+      pass "jdk: check-jdk-gui rejects a headless-only JDK"
+    else
+      fail "jdk: check-jdk-gui did not explain the headless-only JDK"
+      printf '%s\n' "$out" | indent
+    fi
+  else
+    skip "jdk: headless-only JDK detection (Linux-only check)"
+  fi
+  : > "$fake/lib/libawt_xawt.so"
+  if out=$(make -s -C "$REPO_DIR" check-jdk-gui INSTALL_DIR="$install" 2>&1); then
+    pass "jdk: check-jdk-gui accepts a GUI-capable JDK"
+  else
+    fail "jdk: check-jdk-gui rejected a GUI-capable JDK"
+    printf '%s\n' "$out" | indent
+  fi
+}
+
+if want env; then check_jdk_gui; fi
 
 # ── 1. Extension classes ──────────────────────────────────────────────────────
 if want extensions; then

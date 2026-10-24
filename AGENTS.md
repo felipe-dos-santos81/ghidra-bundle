@@ -110,7 +110,7 @@ Operational context, invariants and conventions for AI coding agents working in 
 | Stage | Target (alias) | Description |
 | :--- | :--- | :--- |
 | `00` | `00-deps` (`deps`) | Installs missing OS packages (`apt`/`brew`) and `uv` |
-| `00` | `00-env` (`env`) | Checks JDK 25, Maven, Clang, Python 3, uv, Git, curl, GNU `timeout` (`gtimeout` on macOS); warns when the optional StormLib or Node.js is missing |
+| `00` | `00-env` (`env`) | Checks JDK 25, Maven, Clang, Python 3, uv, Git, curl, GNU `timeout` (`gtimeout` on macOS); warns when the JDK is headless-only or the optional StormLib or Node.js is missing |
 | `01` | `01-checkout` (`checkout`) | Fetches submodules (`--depth 1`) |
 | `02` | `02-build-ghidra` (`build-ghidra`) | Checks the version pin, runs `build-ghidra.sh` |
 | `03` | `03-install-ghidra` (`install-ghidra`) | Extracts the zip to `dist/`, patches `launch.properties` |
@@ -128,7 +128,7 @@ Operational context, invariants and conventions for AI coding agents working in 
 | `14` | `14-venv` (`venv`) | Creates `.venv` and installs `bridge-mcp-ghidra` |
 | `15` | `15-register-mcp` (`register-mcp`) | Registers `ghidra` with opencode (atomic JSON write; a config that is not plain JSON, such as JSONC, is left unchanged with a warning) and Claude Code (`claude mcp add --scope user`, skipped if `claude` is absent), through the `register_mcp` macro |
 | `16` | `16-install-rea` (`install-rea`) | Installs REA 6.3.0 from its lockfile (`npm ci`), applies the Ghidra 12.2 compatibility patch, writes the `.rea/rea` wrapper and registers `rea` (`register_mcp`); warns and skips without suitable Node.js or when npm fails |
-| — | `test` | Sanity suite (`tests/run-sanity.sh`), in sections: `extensions`, `fixtures` (ELF/DOS/LE via `SanityCheck.java`), `mcp` (GhidraMCP over HTTP on `TEST_MCP_PORT`, 18089), `dist`, `binexport`, `portable`, `jython`, `pyghidra`, `rea`. `SANITY_ONLY=dist,pyghidra make test` runs a subset |
+| — | `test` | Sanity suite (`tests/run-sanity.sh`), in sections: `env`, `extensions`, `fixtures` (ELF/DOS/LE via `SanityCheck.java`), `mcp` (GhidraMCP over HTTP on `TEST_MCP_PORT`, 18089), `dist`, `binexport`, `portable`, `jython`, `pyghidra`, `rea`. `SANITY_ONLY=dist,pyghidra make test` runs a subset |
 
 Runtime and maintenance: `install` (runs `$(PIPELINE)`, all of the above, with `verify-extensions` after stage 12 so a broken extension stops the install before MCP registration, ending with `test`), `run`, `run-bridge`, `verify` (probes `http://127.0.0.1:8089/check_connection`), `clean`, `distclean`.
 
@@ -144,7 +144,7 @@ Runtime and maintenance: `install` (runs `$(PIPELINE)`, all of the above, with `
    - Add new extensions through `$(call install_extension,dir,src,zip glob[,legacy dir][,gradle subdir][,commit dir][,patch identity])`, add a check to `VerifyExtensions.java`, add `PACKAGE_PATTERNS` and `BUILD_OUTPUTS` entries in `tests/run-sanity.sh`, and add its build directories to `clean`.
    - Give every user-facing target a `## description`; `make help` lists those.
 2. **Bash scripts:** use `set -euo pipefail` and validate with `bash -n <script>`. `build-ghidra.sh` expects `JAVA_HOME` (a full JDK 25, independently revalidated) from the Makefile.
-3. **JDK requirement:** every JDK reference is a full JDK: `bin/java` and `bin/javac` must both be executable and report major 25. The reusable `$(call jdk_usable,dir)` check enforces this in `00-deps` (JDK package installation), `00-env`, `03-install-ghidra` and `test`; Linux discovery only accepts homes with both binaries. A JRE-only or wrong-major `JAVA25_HOME` fails `make env`/`make test` and `build-ghidra.sh` with an explicit message.
+3. **JDK requirement:** every JDK reference is a full JDK: `bin/java` and `bin/javac` must both be executable and report major 25. The reusable `$(call jdk_usable,dir)` check enforces this in `00-deps` (JDK package installation), `00-env`, `03-install-ghidra` and `test`; Linux discovery only accepts homes with both binaries. A JRE-only or wrong-major `JAVA25_HOME` fails `make env`/`make test` and `build-ghidra.sh` with an explicit message. A **headless-only** JDK (Ubuntu's `openjdk-25-jdk-headless` + `openjdk-25-jre-headless`) passes `jdk_usable` but cannot open Ghidra's GUI: it lacks `libawt_xawt.so`, so `GraphicsEnvironment.isHeadless()` is true and the GUI exits with code 1. `$(call jdk_gui_capable,dir)` detects this on Linux (always true on macOS); `00-deps` adds `openjdk-25-jre` for a headless JDK under `/usr/lib/jvm` (and warns for a custom headless `JAVA25_HOME`), `00-env` warns, and `make run` fails with an actionable message instead of launch.sh's generic "Exited with error". `make run` checks the JDK pinned in `support/launch.properties` (`LAUNCH_JDK`), which is what the launcher actually uses; `make test` only needs a headless JDK.
 4. **Before merging:**
    - `make help` renders cleanly.
    - `make env` passes.

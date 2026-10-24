@@ -28,7 +28,7 @@ make run       # launch Ghidra
 
 `make install` installs missing prerequisites with `sudo apt` (Linux) or `brew` (macOS): JDK 25, Maven, Clang, Python 3.10+, uv, Git, curl, GNU `timeout` (`gtimeout` on macOS) and optional StormLib for MPQ support. REA also needs a supported Node.js/npm on `PATH` (checked by `make env`); Node.js is not installed automatically. Java dependencies download on the first build, and completed stages are skipped.
 
-On apt-based Linux distributions, `make deps` installs `openjdk-25-jdk` when available. If your distribution does not provide it, install a full JDK 25 yourself and export `JAVA25_HOME=/absolute/path/to/jdk` before running `make deps` or `make install`; no additional package repository is required.
+On apt-based Linux distributions, `make deps` installs `openjdk-25-jdk` when available. If your distribution does not provide it, install a full JDK 25 yourself and export `JAVA25_HOME=/absolute/path/to/jdk` before running `make deps` or `make install`; no additional package repository is required. Ubuntu splits the GUI libraries into a separate package: a headless-only JDK (`openjdk-25-jdk-headless`) builds and tests the bundle but cannot open Ghidra, so `make deps` adds `openjdk-25-jre` when needed and `make run` explains the problem if it is still missing.
 
 ## Using the MCP server
 

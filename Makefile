@@ -76,6 +76,20 @@ jdk_usable = [ -n "$(strip $(1))" ] && [ -x "$(strip $(1))/bin/java" ] && \
 	"$(strip $(1))/bin/java" -version 2>&1 | grep -q 'version "$(JAVA_MAJOR)' && \
 	"$(strip $(1))/bin/javac" -version 2>&1 | grep -q ' $(JAVA_MAJOR)'
 
+# $(call jdk_gui_capable,home): succeeds when the JDK can open AWT windows. Ubuntu's
+# openjdk-<n>-jdk-headless passes jdk_usable but omits libawt_xawt.so, so Java reports
+# GraphicsEnvironment.isHeadless() and Ghidra's GUI exits before opening a window.
+jdk_gui_capable = [ "$(UNAME_S)" = "Darwin" ] || [ -e "$(strip $(1))/lib/libawt_xawt.so" ]
+
+# JDK the installed launcher will use: 03-install-ghidra pins JAVA_HOME_OVERRIDE in
+# launch.properties (rewritten when JAVA25_HOME changes); fall back before the install exists.
+LAUNCH_JDK = $(or $(shell sed -n 's/^JAVA_HOME_OVERRIDE=//p' "$(LAUNCH_PROPS)" 2>/dev/null | \
+	tail -n 1),$(JAVA25_HOME))
+
+# Fails with an actionable message when the launcher's JDK cannot open a GUI.
+check_jdk_gui = $(call jdk_gui_capable,$(LAUNCH_JDK)) || \
+	{ $(ERR) "JDK at '$(LAUNCH_JDK)' cannot open a GUI (headless-only: missing libawt_xawt.so); 'make run' cannot start Ghidra. Install the GUI part of the JDK (Linux: 'sudo apt install openjdk-$(JAVA_MAJOR)-jre') or run 'make deps'."; exit 1; }
+
 # Message helpers: $(OK) "text", $(WARN) "text", $(ERR) "text", $(TICK) "label" "detail"
 OK = printf '\033[32m%s\033[0m\n'
 TICK = printf '\033[32m✔ %-7s\033[0m %s\n'
@@ -95,7 +109,7 @@ GHIDRA_ZIP = ghidra_$(1)_*_[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].zip
 	10-install-findcrypt install-findcrypt 11-install-binexport install-binexport \
 	12-install-scripts install-scripts verify-extensions 13-pyghidra pyghidra \
 	14-venv venv 15-register-mcp register-mcp 16-install-rea install-rea \
-	test install run run-bridge verify clean distclean
+	test install check-jdk-gui run run-bridge verify clean distclean
 
 help: ## Show this help
 	@printf '\033[01;32mGhidra Bundle (Ghidra $(GHIDRA_VERSION))\033[0m\n\nUsage: make <target>\n\n'
@@ -115,13 +129,22 @@ help: ## Show this help
 		command -v clang >/dev/null 2>&1 || xcode-select --install; \
 	else \
 		PKGS=""; \
-		$(call jdk_usable,$(JAVA25_HOME)) || PKGS+=" openjdk-25-jdk"; \
+		if ! $(call jdk_usable,$(JAVA25_HOME)); then \
+			PKGS+=" openjdk-25-jdk"; \
+		elif ! $(call jdk_gui_capable,$(JAVA25_HOME)); then \
+			case "$(JAVA25_HOME)" in \
+				/usr/lib/jvm/*) PKGS+=" openjdk-25-jre" ;; \
+			esac; \
+		fi; \
 		for p in maven:mvn clang:clang git:git curl:curl; do \
 			command -v $${p#*:} >/dev/null 2>&1 || PKGS+=" $${p%%:*}"; \
 		done; \
 		python3 -c 'import venv' >/dev/null 2>&1 || PKGS+=" python3 python3-venv"; \
 		if [ -n "$$PKGS" ]; then sudo apt update && sudo apt install -y $$PKGS || exit 1; \
 		else echo "All OS packages present."; fi; \
+		if [ -n "$(JAVA25_HOME)" ] && ! $(call jdk_gui_capable,$(JAVA25_HOME)); then \
+			$(WARN) "JDK $(JAVA_MAJOR) at '$(JAVA25_HOME)' is headless-only; builds and 'make test' work, but 'make run' cannot start Ghidra. Install the GUI part (Linux: 'sudo apt install openjdk-$(JAVA_MAJOR)-jre') or set JAVA25_HOME to a GUI-capable JDK."; \
+		fi; \
 		$(STORMLIB_CHECK) 2>/dev/null || \
 			sudo apt install -y libstorm-dev || \
 			$(WARN) "libstorm-dev could not be installed; MPQ support stays off"; \
@@ -137,6 +160,8 @@ check_tool = command -v $(1) >/dev/null 2>&1 || { $(ERR) "$(2) not found on PATH
 	@$(call jdk_usable,$(JAVA25_HOME)) || \
 		{ $(ERR) "JAVA25_HOME is not a usable JDK $(JAVA_MAJOR) (needs executable bin/java and bin/javac reporting major $(JAVA_MAJOR)): '$(JAVA25_HOME)' (run 'make deps')"; exit 1; }
 	@$(TICK) "JDK 25" "$(JAVA25_HOME)"
+	@$(call jdk_gui_capable,$(JAVA25_HOME)) || \
+		$(WARN) "JDK $(JAVA_MAJOR) at '$(JAVA25_HOME)' is headless-only (no libawt_xawt.so): builds and 'make test' work, but 'make run' cannot start Ghidra (run 'make deps')."
 	@$(call check_tool,mvn,Maven,mvn -version)
 	@$(call check_tool,clang,Clang,clang --version)
 	@$(call check_tool,python3,Python,python3 --version)
@@ -460,8 +485,13 @@ test: ## Run all sanity checks
 	@$(call jdk_usable,$(JAVA25_HOME)) || { $(ERR) "JDK 25 not found (run 'make deps')"; exit 1; }
 	@PACKAGES_DIR="$(PACKAGES_DIR)" REA_BIN="$(REA_BIN)" tests/run-sanity.sh "$(INSTALL_DIR)" "$(JAVA25_HOME)"
 
+# Internal target used by `make test` to exercise the GUI-capability check.
+check-jdk-gui:
+	@$(check_jdk_gui)
+
 run: ## Launch Ghidra (fails if port 8089 is already in use)
 	@[ -x "$(INSTALL_DIR)/ghidraRun" ] || { $(ERR) "Ghidra not installed; run 'make install'"; exit 1; }
+	@$(check_jdk_gui)
 	@if { command -v lsof >/dev/null && lsof -i :$(MCP_PORT); } || \
 		{ command -v ss >/dev/null && ss -ltnp 2>/dev/null | grep ':$(MCP_PORT) '; }; then \
 		$(ERR) "port $(MCP_PORT) is already in use (see above)"; exit 1; \
