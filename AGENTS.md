@@ -25,7 +25,7 @@ Operational context, invariants and conventions for AI coding agents working in 
 ## 2. Invariants
 
 ### 2.1 Portable Mode & Filesystem Isolation
-- **Never write outside `portable/`**: not to Ghidra's own defaults (`~/.config/ghidra` or `$XDG_CONFIG_HOME`, `~/Library/ghidra`, `/var/tmp/<user>-ghidra` or `$XDG_CACHE_HOME`; `~/.ghidra` before 11.1), nor to `~/.config/GhidrAssist` or `~/.reai`. `make test` fails if any of them (or a directory literally named `${INSTALL_DIR}`) appears during the run, and requires the forks' default paths to lie under this install's `portable/settings`.
+- **Keep Ghidra, extension and REA runtime state under `portable/`**, not in Ghidra's defaults (`~/.config/ghidra` or `$XDG_CONFIG_HOME`, `~/Library/ghidra`, `/var/tmp/<user>-ghidra` or `$XDG_CACHE_HOME`; `~/.ghidra` before 11.1), `~/.config/GhidrAssist` or `~/.reai`. `make test` fails if any of them (or a directory literally named `${INSTALL_DIR}`) appears during the run, and requires the forks' default paths to lie under this install's `portable/settings`.
 - `03-install-ghidra` appends this block to `support/launch.properties`, with the absolute install path:
   ```properties
   # --- Portable Mode Overrides ---
@@ -89,7 +89,8 @@ Operational context, invariants and conventions for AI coding agents working in 
 ### 2.8 REA
 - REA is **not a Ghidra extension**: nothing is installed into `Ghidra/Extensions/`, and `install_extension`, `VerifyExtensions.java` and `dist/packages/` do not apply. It loads its own bridge script through `-scriptPath` into a throwaway read-only project.
 - `.rea/package.json` pins `rea-agents` exactly and the committed `.rea/package-lock.json` pins every transitive package with its hash; the stage installs with `npm ci` and reinstalls when the lockfile changes (its hash is kept in `.rea/node_modules/.bundle-lock`). To bump REA, edit the version in `package.json` and run `npm install --prefix .rea --package-lock-only --ignore-scripts`. Upstream ships breaking releases often (4.0.0 to 6.3.0 in five days). Its Ghidra provider admits Linux arm64 from 6.1.0 and needs the host-native decompiler this source build provides.
-- REA 6.3.0 upstream verifies Ghidra 12.1.4 and accepts only 12.1.x. `scripts/patch-rea-ghidra.py` adds exactly 12.2 as compatible, not upstream-verified; 12.2.1 and other versions remain rejected, and Java bounds still come from `application.properties`. Stage 16 applies the fail-closed, idempotent patch on every eligible run. `tests/test_patch_rea_ghidra.py` covers the transformation and real installed policy; the sanity suite also checks doctor and real decompilation.
+- REA 6.3.0 upstream verifies Ghidra 12.1.4 and accepts only 12.1.x. `scripts/patch-rea-ghidra.py` adds exactly 12.2 as compatible, not upstream-verified; 12.2.1 and other versions remain rejected, and Java bounds still come from `application.properties`. Stage 16 applies the fail-closed, idempotent patch on every eligible run.
+- The package gate accepts only the exact pristine or patched policy SHA-256, so unexpected changes outside the replacement anchors are also fatal. Update `REA_VERSION` and both hashes with the REA pin, and the patched hash with the bundle's Ghidra version. `tests/test_patch_rea_ghidra.py` covers the transformation, real installed policy and outside-anchor rejection; the sanity suite also checks doctor and real decompilation.
 - The stage is optional: without npm and Node.js 22.19+, 24.11+ or 26+, or when `npm ci` fails (no network), it warns and carries on, deleting a `.rea/rea` that no longer runs, and `make test` reports SKIP for the `rea` section.
 - `$(REA_BIN)` = `.rea/rea` is a wrapper written on every run of the stage. It sets `GHIDRA_INSTALL_DIR`, `JAVA_HOME`, `REA_ANALYSIS_PROVIDER=ghidra` and `TMPDIR` (`portable/temp`, where REA keeps each session's project and its copy of the analyzed file) and calls node by absolute path, so both MCP registrations are just `.rea/rea --mcp`. Re-run `make install-rea` after changing Node or the JDK.
 - REA's Ghidra sessions read `launch.properties`, so they write under `portable/` (in `<user>-ghidra/` directories, next to the GUI's `ghidra/`). Never run `rea setup`: it writes skills and registrations into several agent directories under `~`.
@@ -140,14 +141,15 @@ Runtime and maintenance: `install` (runs `$(PIPELINE)`, all of the above, with `
    - Every stage is idempotent: skip when its output exists, use `unzip -q -o` and `rm -rf`.
    - Propagate errors (`|| exit 1`, `{ ...; exit 1; }`).
    - Print messages with the `$(OK)`, `$(WARN)` and `$(ERR)` helpers (ANSI via `printf`).
-   - Add new extensions through `$(call install_extension,dir,src,zip glob[,legacy dir][,gradle subdir])`, add a check to `VerifyExtensions.java`, and add a `PACKAGE_PATTERNS` and `BUILD_OUTPUTS` entry in `tests/run-sanity.sh`.
+   - Add new extensions through `$(call install_extension,dir,src,zip glob[,legacy dir][,gradle subdir][,commit dir][,patch identity])`, add a check to `VerifyExtensions.java`, add `PACKAGE_PATTERNS` and `BUILD_OUTPUTS` entries in `tests/run-sanity.sh`, and add its build directories to `clean`.
    - Give every user-facing target a `## description`; `make help` lists those.
 2. **Bash scripts:** use `set -euo pipefail` and validate with `bash -n <script>`. `build-ghidra.sh` expects `JAVA_HOME` (a full JDK 25, independently revalidated) from the Makefile.
 3. **JDK requirement:** every JDK reference is a full JDK: `bin/java` and `bin/javac` must both be executable and report major 25. The reusable `$(call jdk_usable,dir)` check enforces this in `00-deps` (JDK package installation), `00-env`, `03-install-ghidra` and `test`; Linux discovery only accepts homes with both binaries. A JRE-only or wrong-major `JAVA25_HOME` fails `make env`/`make test` and `build-ghidra.sh` with an explicit message.
-3. **Before merging:**
+4. **Before merging:**
    - `make help` renders cleanly.
    - `make env` passes.
    - `make -n install` expands without errors.
    - `make test` passes (needs an installed Ghidra).
+   - `python3 -I tests/test_prepare_extension_source.py` passes.
    - `git status` is clean.
-4. **Adding a test fixture:** build it in `tests/make_fixtures.py` (or add a C file compiled by `tests/run-sanity.sh`), list its facts in `tests/expect/<name>.txt` (grammar in the sanity-test spec, section 5), add a `run_fixture <name> <file> [loader]` line to `tests/run-sanity.sh`, then record snapshots with `UPDATE_SNAPSHOTS=1 make test`. `SanityCheck.java` needs no change.
+5. **Adding a test fixture:** build it in `tests/make_fixtures.py` (or add a C file compiled by `tests/run-sanity.sh`), list its facts in `tests/expect/<name>.txt` (grammar in the sanity-test spec, section 5), add a `run_fixture <name> <file> [loader]` line to `tests/run-sanity.sh`, then record snapshots with `UPDATE_SNAPSHOTS=1 make test`. `SanityCheck.java` needs no change.

@@ -47,16 +47,12 @@ class ReaPolicyPatchTest(unittest.TestCase):
         return root
 
     def test_adds_compatible_release_and_is_idempotent(self):
-        root = self.make_package()
-        self.assertTrue(patch_package(root, "12.2"))
-        policy_path = root / "dist" / "ghidra" / "GhidraInstallationPolicy.js"
-        first = policy_path.read_text(encoding="utf-8")
+        first = patch_policy(POLICY, "12.2")
         self.assertIn('export const SUPPORTED_GHIDRA_VERSION = "12.1.4";', first)
         self.assertIn('const BUNDLE_GHIDRA_VERSION = "12.2";', first)
         self.assertIn("sameVerifiedLine || raw === BUNDLE_GHIDRA_VERSION", first)
         self.assertIn(".x or ${BUNDLE_GHIDRA_VERSION}`", first)
-        self.assertFalse(patch_package(root, "12.2"))
-        self.assertEqual(first, policy_path.read_text(encoding="utf-8"))
+        self.assertEqual(first, patch_policy(first, "12.2"))
 
     def test_rejects_another_ghidra_version_without_writing(self):
         root = self.make_package()
@@ -74,6 +70,23 @@ class ReaPolicyPatchTest(unittest.TestCase):
         changed = POLICY.replace(
             "version.minor === verified.minor", "version.minor !== verified.minor"
         )
+        root = self.make_package(policy=changed)
+        policy_path = root / "dist" / "ghidra" / "GhidraInstallationPolicy.js"
+        with self.assertRaises(PatchError):
+            patch_package(root, "12.2")
+        self.assertEqual(changed, policy_path.read_text(encoding="utf-8"))
+
+    def test_rejects_changes_outside_patch_anchors(self):
+        installed_path = (
+            Path(__file__).resolve().parents[1]
+            / ".rea" / "node_modules" / "rea-agents" / "dist" / "ghidra"
+            / "GhidraInstallationPolicy.js"
+        )
+        if not installed_path.is_file():
+            self.skipTest("rea-agents is not installed")
+        installed = installed_path.read_text(encoding="utf-8")
+        changed = installed.replace("major >= requirement.minimumMajor", "true")
+        self.assertNotEqual(installed, changed)
         root = self.make_package(policy=changed)
         policy_path = root / "dist" / "ghidra" / "GhidraInstallationPolicy.js"
         with self.assertRaises(PatchError):

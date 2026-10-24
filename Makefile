@@ -20,18 +20,20 @@ INSTALL_DIR := $(DIST_DIR)/ghidra_$(GHIDRA_VERSION)_PUBLIC
 PORTABLE_DIR := $(INSTALL_DIR)/portable
 LAUNCH_PROPS := $(INSTALL_DIR)/support/launch.properties
 EXT_DIR := $(INSTALL_DIR)/Ghidra/Extensions
+EXT_PATCH_SCRIPT := scripts/prepare-extension-source.py
+EXT_PATCH_HASH = $(shell git hash-object $(EXT_PATCH_SCRIPT))
 MCP_BUILD_DIR := $(DIST_DIR)/build/ghidra-mcp
-MCP_PATCH_ID = ghidra-mcp-$(shell git hash-object scripts/prepare-extension-source.py)
+MCP_PATCH_ID = ghidra-mcp-$(EXT_PATCH_HASH)
 LX_BUILD_DIR := $(DIST_DIR)/build/lx-loader
-LX_PATCH_ID = lx-loader-$(shell git hash-object scripts/prepare-extension-source.py)
+LX_PATCH_ID = lx-loader-$(EXT_PATCH_HASH)
 DOS_TOOLBOX_BUILD_DIR := $(DIST_DIR)/build/dos-toolbox
-DOS_TOOLBOX_PATCH_ID = dos-toolbox-$(shell git hash-object scripts/prepare-extension-source.py)
+DOS_TOOLBOX_PATCH_ID = dos-toolbox-$(EXT_PATCH_HASH)
 GHIDRASSIST_BUILD_DIR := $(DIST_DIR)/build/GhidrAssist
-GHIDRASSIST_PATCH_ID = ghidrassist-$(shell git hash-object scripts/prepare-extension-source.py)
+GHIDRASSIST_PATCH_ID = ghidrassist-$(EXT_PATCH_HASH)
 REVENG_BUILD_DIR := $(DIST_DIR)/build/plugin-ghidra
-REVENG_PATCH_ID = plugin-ghidra-$(shell git hash-object scripts/prepare-extension-source.py)
+REVENG_PATCH_ID = plugin-ghidra-$(EXT_PATCH_HASH)
 FINDCRYPT_BUILD_DIR := $(DIST_DIR)/build/GhidraFindcrypt
-FINDCRYPT_PATCH_ID = ghidrafindcrypt-$(shell git hash-object scripts/prepare-extension-source.py)
+FINDCRYPT_PATCH_ID = ghidrafindcrypt-$(EXT_PATCH_HASH)
 VENV_DIR := $(BUNDLE_DIR)/.venv
 BRIDGE_BIN := $(VENV_DIR)/bin/bridge-mcp-ghidra
 OPENCODE_CONFIG := $(HOME)/.config/opencode/opencode.json
@@ -59,7 +61,8 @@ else
 JAVA25_HOME := $(shell for j in "$$JAVA_HOME" /usr/lib/jvm/*25* \
 	"$$(dirname "$$(dirname "$$(readlink -f "$$(command -v javac)" 2>/dev/null)")")"; do \
 	[ -n "$$j" ] && [ -x "$$j/bin/java" ] && [ -x "$$j/bin/javac" ] && \
-	"$$j/bin/java" -version 2>&1 | grep -q 'version "25' && { readlink -f "$$j"; break; }; \
+	"$$j/bin/java" -version 2>&1 | grep -q 'version "25' && \
+		"$$j/bin/javac" -version 2>&1 | grep -q ' 25' && { readlink -f "$$j"; break; }; \
 	done)
 endif
 endif
@@ -84,14 +87,15 @@ comma := ,
 # Match that date to distinguish them from extension zips.
 GHIDRA_ZIP = ghidra_$(1)_*_[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].zip
 
-.PHONY: help 00-deps deps 00-env env 01-checkout checkout 02-build-ghidra build-ghidra \
-	03-install-ghidra install-ghidra 04-install-mcp install-mcp \
-	05-install-lx-loader install-lx-loader 06-install-dos-toolbox install-dos-toolbox \
-	verify-extensions test 14-venv venv 15-register-mcp register-mcp \
-	07-install-ghidrassist install-ghidrassist 08-install-reveng install-reveng 09-install-retsync install-retsync 10-install-findcrypt install-findcrypt \
-	11-install-binexport install-binexport 12-install-scripts install-scripts \
-	13-pyghidra pyghidra 16-install-rea install-rea \
-	install run run-bridge verify clean distclean
+.PHONY: help 00-deps deps 00-env env 01-checkout checkout \
+	02-build-ghidra build-ghidra 03-install-ghidra install-ghidra \
+	04-install-mcp install-mcp 05-install-lx-loader install-lx-loader \
+	06-install-dos-toolbox install-dos-toolbox 07-install-ghidrassist install-ghidrassist \
+	08-install-reveng install-reveng 09-install-retsync install-retsync \
+	10-install-findcrypt install-findcrypt 11-install-binexport install-binexport \
+	12-install-scripts install-scripts verify-extensions 13-pyghidra pyghidra \
+	14-venv venv 15-register-mcp register-mcp 16-install-rea install-rea \
+	test install run run-bridge verify clean distclean
 
 help: ## Show this help
 	@printf '\033[01;32mGhidra Bundle (Ghidra $(GHIDRA_VERSION))\033[0m\n\nUsage: make <target>\n\n'
@@ -129,7 +133,7 @@ help: ## Show this help
 check_tool = command -v $(1) >/dev/null 2>&1 || { $(ERR) "$(2) not found on PATH (run 'make deps')"; exit 1; }; \
 	$(TICK) "$(2)" "$$($(3) 2>&1 | head -n 1)"
 
-00-env: ## Check host prerequisites (JDK 25, Maven, Clang, Python 3, uv, Git, curl, GNU timeout; StormLib and Node.js optional)
+00-env: ## Check host prerequisites (StormLib and Node.js optional)
 	@$(call jdk_usable,$(JAVA25_HOME)) || \
 		{ $(ERR) "JAVA25_HOME is not a usable JDK $(JAVA_MAJOR) (needs executable bin/java and bin/javac reporting major $(JAVA_MAJOR)): '$(JAVA25_HOME)' (run 'make deps')"; exit 1; }
 	@$(TICK) "JDK 25" "$(JAVA25_HOME)"
@@ -185,10 +189,10 @@ PORTABLE_BLOCK = '\# --- Portable Mode Overrides ---' \
 	'VMARGS=-Dapplication.tempdir=$(PORTABLE_DIR)/temp'
 
 03-install-ghidra: 02-build-ghidra ## Extract Ghidra into dist/ and enable portable mode
+	@$(call jdk_usable,$(JAVA25_HOME)) || { $(ERR) "JDK 25 not found (run 'make deps')"; exit 1; }
 	@if grep -qs '^# --- Portable Mode Overrides ---' "$(LAUNCH_PROPS)"; then \
 		EXPECTED=$$(printf '%s\n' $(PORTABLE_BLOCK)); \
 		if [ "$$(sed -n '/^# --- Portable Mode Overrides ---/,$$p' "$(LAUNCH_PROPS)")" != "$$EXPECTED" ]; then \
-			$(call jdk_usable,$(JAVA25_HOME)) || { $(ERR) "JDK 25 not found (run 'make deps')"; exit 1; }; \
 			{ sed '/^# --- Portable Mode Overrides ---/,$$d' "$(LAUNCH_PROPS)" && echo "$$EXPECTED"; } \
 				> "$(LAUNCH_PROPS).tmp" && mv "$(LAUNCH_PROPS).tmp" "$(LAUNCH_PROPS)" || exit 1; \
 			$(OK) "Rewrote the portable-mode block in launch.properties for $(INSTALL_DIR)."; \
@@ -250,27 +254,27 @@ fi
 endef
 
 04-install-mcp: 03-install-ghidra ## Build and install the GhidraMCP extension
-	@python3 -I scripts/prepare-extension-source.py ghidra-mcp \
+	@python3 -I $(EXT_PATCH_SCRIPT) ghidra-mcp \
 		ghidra-mcp "$(MCP_BUILD_DIR)" "$(GHIDRA_VERSION)" || exit 1;
 	$(call install_extension,GhidraMCP,$(MCP_BUILD_DIR),$(MCP_BUILD_DIR)/build/distributions/GhidraMCP-*.zip,,,ghidra-mcp,$(MCP_PATCH_ID))
 
 05-install-lx-loader: 03-install-ghidra ## Build and install the lx-loader extension
-	@python3 -I scripts/prepare-extension-source.py lx-loader \
+	@python3 -I $(EXT_PATCH_SCRIPT) lx-loader \
 		lx-loader "$(LX_BUILD_DIR)" "$(GHIDRA_VERSION)" || exit 1;
 	$(call install_extension,lx-loader,$(LX_BUILD_DIR),$(LX_BUILD_DIR)/dist/ghidra_$(GHIDRA_VERSION)_*_lx-loader.zip,ghidra-lx-loader,,lx-loader,$(LX_PATCH_ID))
 
 06-install-dos-toolbox: 03-install-ghidra ## Build and install the GhidraDosToolbox extension
-	@python3 -I scripts/prepare-extension-source.py dos-toolbox \
+	@python3 -I $(EXT_PATCH_SCRIPT) dos-toolbox \
 		dos-toolbox "$(DOS_TOOLBOX_BUILD_DIR)" "$(GHIDRA_VERSION)" || exit 1;
 	$(call install_extension,dos-toolbox,$(DOS_TOOLBOX_BUILD_DIR),$(DOS_TOOLBOX_BUILD_DIR)/dist/ghidra_$(GHIDRA_VERSION)_*_dos-toolbox.zip,GhidraDosToolbox,,dos-toolbox,$(DOS_TOOLBOX_PATCH_ID))
 
 07-install-ghidrassist: 03-install-ghidra ## Build and install GhidrAssist (LLM assistant; unconfigured)
-	@python3 -I scripts/prepare-extension-source.py ghidrassist \
+	@python3 -I $(EXT_PATCH_SCRIPT) ghidrassist \
 		GhidrAssist "$(GHIDRASSIST_BUILD_DIR)" "$(GHIDRA_VERSION)" || exit 1;
 	$(call install_extension,GhidrAssist,$(GHIDRASSIST_BUILD_DIR),$(GHIDRASSIST_BUILD_DIR)/dist/ghidra_$(GHIDRA_VERSION)_*_GhidrAssist.zip,,,GhidrAssist,$(GHIDRASSIST_PATCH_ID))
 
 08-install-reveng: 03-install-ghidra ## Build and install the RevEng.AI plugin (cloud; unconfigured)
-	@python3 -I scripts/prepare-extension-source.py plugin-ghidra \
+	@python3 -I $(EXT_PATCH_SCRIPT) plugin-ghidra \
 		plugin-ghidra "$(REVENG_BUILD_DIR)" "$(GHIDRA_VERSION)" || exit 1;
 	$(call install_extension,plugin-ghidra,$(REVENG_BUILD_DIR),$(REVENG_BUILD_DIR)/dist/ghidra_$(GHIDRA_VERSION)_*_plugin-ghidra.zip,,,plugin-ghidra,$(REVENG_PATCH_ID))
 
@@ -278,7 +282,7 @@ endef
 	$(call install_extension,retsync,ret-sync,ret-sync/ext_ghidra/dist/ghidra_$(GHIDRA_VERSION)_*_retsync.zip,,ext_ghidra)
 
 10-install-findcrypt: 03-install-ghidra ## Build and install GhidraFindcrypt (crypto constants)
-	@python3 -I scripts/prepare-extension-source.py ghidrafindcrypt \
+	@python3 -I $(EXT_PATCH_SCRIPT) ghidrafindcrypt \
 		GhidraFindcrypt "$(FINDCRYPT_BUILD_DIR)" "$(GHIDRA_VERSION)" || exit 1;
 	$(call install_extension,GhidraFindcrypt,$(FINDCRYPT_BUILD_DIR),$(FINDCRYPT_BUILD_DIR)/dist/ghidra_$(GHIDRA_VERSION)_*_GhidraFindcrypt.zip,,,GhidraFindcrypt,$(FINDCRYPT_PATCH_ID))
 
@@ -443,15 +447,16 @@ install-rea: 16-install-rea
 
 # ── Pipeline & runtime ────────────────────────────────────────────────────────
 
-PIPELINE := 00-deps 00-env 01-checkout 02-build-ghidra 03-install-ghidra 04-install-mcp \
-	05-install-lx-loader 06-install-dos-toolbox 07-install-ghidrassist 08-install-reveng 09-install-retsync 10-install-findcrypt \
-	11-install-binexport 12-install-scripts verify-extensions 13-pyghidra 14-venv 15-register-mcp \
-	16-install-rea test
+PIPELINE := 00-deps 00-env 01-checkout 02-build-ghidra 03-install-ghidra \
+	04-install-mcp 05-install-lx-loader 06-install-dos-toolbox \
+	07-install-ghidrassist 08-install-reveng 09-install-retsync 10-install-findcrypt \
+	11-install-binexport 12-install-scripts verify-extensions 13-pyghidra \
+	14-venv 15-register-mcp 16-install-rea test
 
 install: $(PIPELINE) ## Run the full pipeline (all stages above, in order)
 	@$(OK) "Ghidra Bundle installed. Run 'make run' to launch Ghidra."
 
-test: ## Run the sanity test suite (fixtures, extensions, GhidraMCP, dist, BinExport, Jython, PyGhidra, REA, portable mode)
+test: ## Run all sanity checks
 	@$(call jdk_usable,$(JAVA25_HOME)) || { $(ERR) "JDK 25 not found (run 'make deps')"; exit 1; }
 	@PACKAGES_DIR="$(PACKAGES_DIR)" REA_BIN="$(REA_BIN)" tests/run-sanity.sh "$(INSTALL_DIR)" "$(JAVA25_HOME)"
 

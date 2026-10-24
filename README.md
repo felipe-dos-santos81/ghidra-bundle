@@ -1,6 +1,6 @@
 # Ghidra Bundle
 
-A reproducible, self-contained **Ghidra 12.2**, built from source with eight extensions, Jython, Diablo 2 scripts, PyGhidra with MPQ support and an MCP bridge for AI assistants. Ghidra runs in portable mode: settings, cache and temp files stay in `dist/`, and `~/.ghidra` is never touched. Every built zip is collected in `dist/packages/`.
+A reproducible, self-contained **Ghidra 12.2**, built from source with eight extensions, Jython, Diablo 2 scripts, PyGhidra with MPQ support and an MCP bridge for AI assistants. Ghidra runs in portable mode: settings, cache and temp files stay under `dist/`. Every built zip is moved to `dist/packages/`.
 
 | Component | What it adds |
 | :--- | :--- |
@@ -26,7 +26,7 @@ make install   # install dependencies, build, and test the bundle
 make run       # launch Ghidra
 ```
 
-`make install` installs missing prerequisites with `sudo apt` (Linux) or `brew` (macOS): JDK 25, Maven, Clang, Python 3.10+, uv, Git, curl, GNU `timeout` (`gtimeout` on macOS) and optional StormLib for MPQ support. REA requires npm and Node.js 22.19+, 24.11+ or 26+ on `PATH`; Node.js is not installed automatically. Run `make env` to check prerequisites. Java dependencies download on the first build, and completed stages are skipped.
+`make install` installs missing prerequisites with `sudo apt` (Linux) or `brew` (macOS): JDK 25, Maven, Clang, Python 3.10+, uv, Git, curl, GNU `timeout` (`gtimeout` on macOS) and optional StormLib for MPQ support. REA also needs a supported Node.js/npm on `PATH` (checked by `make env`); Node.js is not installed automatically. Java dependencies download on the first build, and completed stages are skipped.
 
 On apt-based Linux distributions, `make deps` installs `openjdk-25-jdk` when available. If your distribution does not provide it, install a full JDK 25 yourself and export `JAVA25_HOME=/absolute/path/to/jdk` before running `make deps` or `make install`; no additional package repository is required.
 
@@ -42,50 +42,27 @@ A successful `make install` registers `bridge-mcp-ghidra` as the `ghidra` MCP se
 
 With Node.js available, `make install-rea` installs [REA](https://github.com/morluto/rea) into `.rea/` and registers it as the `rea` MCP server with the same two clients. REA needs no running Ghidra: it imports one file into a throwaway headless project and returns decompilation, references and strings.
 
-REA 6.3.0 upstream verifies Ghidra 12.1.4 and accepts only 12.1.x. The bundle applies a checked, idempotent patch so exactly Ghidra 12.2 is also **compatible, not upstream-verified**; 12.2.1 and other versions remain rejected. Java requirements still come from Ghidra's `application.properties`. The REA sanity section runs policy unit tests, doctor and a real decompilation.
+The bundle's checked compatibility patch lets REA use this Ghidra 12.2 build as **compatible, not upstream-verified**. The `rea` sanity checks cover the policy, doctor and real decompilation.
 
 ```bash
 .rea/rea function /path/to/program.exe entry --json   # the same wrapper the MCP server uses
 ```
 
-The wrapper `.rea/rea` points REA at this bundle's Ghidra and JDK; re-run `make install-rea` after changing Node.js or the JDK. REA's sessions are read-only and deleted on close, and it cannot analyze LE/LX programs, so use the `ghidra` server for persistent projects and for DOS/4GW or OS/2 programs. Take care with DOS/4GW games: REA does not reject them, it treats them as plain DOS MZ and shows only the 16-bit extender stub. REA adds about 150 tools to each client session.
+The wrapper points REA at this bundle's Ghidra and JDK; re-run `make install-rea` after changing either. Sessions are read-only and deleted on close.
+
+REA cannot analyze LE/LX programs. For DOS/4GW games it analyzes only the 16-bit extender stub without warning; use the `ghidra` server for those programs and persistent projects. REA adds about 150 tools to each client session.
 
 ## Make targets
 
-Run `make help` for the same list.
+`make help` lists the pipeline and runtime targets. Numbered stages also have aliases without their numeric prefix (`04-install-mcp` → `install-mcp`).
 
-| Target | What it does |
-| :--- | :--- |
-| `00-deps` (`deps`) | Install missing OS packages and uv |
-| `00-env` (`env`) | Check host prerequisites |
-| `01-checkout` (`checkout`) | Fetch the pinned submodules |
-| `02-build-ghidra` (`build-ghidra`) | Build the Ghidra zip from source (`build-ghidra.sh`) |
-| `03-install-ghidra` (`install-ghidra`) | Extract Ghidra into `dist/` and enable portable mode |
-| `04-install-mcp` (`install-mcp`) | Build and install GhidraMCP |
-| `05-install-lx-loader` (`install-lx-loader`) | Build and install lx-loader |
-| `06-install-dos-toolbox` (`install-dos-toolbox`) | Build and install GhidraDosToolbox |
-| `07-install-ghidrassist` (`install-ghidrassist`) | Build and install GhidrAssist |
-| `08-install-reveng` (`install-reveng`) | Build and install the RevEng.AI plugin |
-| `09-install-retsync` (`install-retsync`) | Build and install ret-sync |
-| `10-install-findcrypt` (`install-findcrypt`) | Build and install GhidraFindcrypt |
-| `11-install-binexport` (`install-binexport`) | Build and install BinExport |
-| `12-install-scripts` (`install-scripts`) | Install Jython and the D2GridraTools scripts |
-| `verify-extensions` | Quick headless check that Ghidra loads every extension's classes |
-| `13-pyghidra` (`pyghidra`) | Set up PyGhidra's venv (in `portable/`) with `bundle_mpq` |
-| `14-venv` (`venv`) | Create `.venv` with `bridge-mcp-ghidra` |
-| `15-register-mcp` (`register-mcp`) | Register the MCP server with opencode and Claude Code |
-| `16-install-rea` (`install-rea`) | Install REA, apply the Ghidra 12.2 compatibility patch, and register its MCP server (optional when Node.js or npm is unavailable) |
-| `test` | Run the sanity test suite (see Testing) |
-| `install` | Run all of the above, in order (ends with `test`) |
-| `run` | Launch Ghidra (fails if port 8089 is in use) |
-| `run-bridge` | Run the MCP bridge over stdio |
-| `verify` | Check the GhidraMCP plugin answers on port 8089 |
-| `clean` | Remove `dist/`, `.venv/`, REA's install in `.rea/` and build outputs |
-| `distclean` | `clean`, then de-initialize the submodules |
+`make clean` removes generated outputs, including `dist/`, `.venv/` and REA's installed runtime. `make distclean` also de-initializes the submodules.
 
 ## Testing
 
-`make test` (also the last stage of `make install`) builds three tiny programs and checks that Ghidra handles them: an i386 ELF object (core loader and decompiler), a DOS MZ file (GhidraDosToolbox loader and syscall analyzer) and an LE file (lx-loader, including an applied fixup). It then starts GhidraMCP's headless server on port 18089 (`TEST_MCP_PORT`) and checks it over HTTP. It also checks the JDK 25 runtime, `dist/packages/`, a headless BinExport export, Jython and the D2 scripts, PyGhidra reading a PKWARE-compressed MPQ, REA policy tests and DOS MZ decompilation (skipped when REA is unavailable), and portable-path isolation. Run a subset with `SANITY_ONLY`, e.g. `SANITY_ONLY=dist,pyghidra make test`.
+`make test` (also the last stage of `make install`) builds three tiny programs: an i386 ELF object, a DOS MZ file and an LE file. It checks their loaders and decompilation, GhidraMCP over HTTP on port 18089 (`TEST_MCP_PORT`), the JDK 25 runtime, packages, BinExport, Jython and the D2 scripts, PyGhidra/MPQ, REA and portable-path isolation. MPQ checks skip without StormLib, and REA integration checks skip when REA is unavailable.
+
+`tests/run-sanity.sh` defines the test sections. Run a subset with `SANITY_ONLY`, for example `SANITY_ONLY=dist,pyghidra make test`.
 
 Decompiled output is compared with `tests/snapshots/`; differences are reported but never fail the run. After a deliberate Ghidra or extension upgrade, review and record the new output with `UPDATE_SNAPSHOTS=1 make test`.
 
@@ -133,7 +110,8 @@ ghidra-bundle/
 ├── D2GridraTools/        # Submodule: Diablo 2 scripts (unlicensed; fetched only)
 ├── .venv/                # Python venv with bridge-mcp-ghidra (git-ignored)
 ├── .rea/                 # REA's version pin and lockfile; node_modules/ and the rea wrapper are git-ignored
-└── dist/                 # Built Ghidra (git-ignored)
+└── dist/                 # Generated installation and packages (git-ignored)
+    ├── build/               # Disposable extension source copies for compatibility patches
     ├── packages/            # Every built zip: Ghidra and each extension
     └── ghidra_12.2_PUBLIC/
         ├── ghidraRun, support/pyghidraRun
@@ -145,7 +123,6 @@ ghidra-bundle/
 ## Notes
 
 - **Changing the Ghidra version:** check out the new tag in the `ghidra` submodule and update `GHIDRA_VERSION` in the `Makefile`. Stage 02 refuses to build if they disagree. Upgrades do not migrate projects or settings; remove superseded installations explicitly when no longer needed.
-- **Ghidra 12.2 compatibility patches:** Ghidra 12.2 removed or changed a few extension APIs, so six extensions (GhidraMCP, lx-loader, GhidraDosToolbox, GhidrAssist, RevEng.AI, GhidraFindcrypt) build from fresh copies under `dist/build/` where `scripts/prepare-extension-source.py` applies small, exact compatibility patches; the submodule checkouts stay pristine. ret-sync and BinExport build unmodified.
+- **Ghidra 12.2 compatibility patches:** six extensions need small API patches. `scripts/prepare-extension-source.py` applies them to disposable copies under `dist/build/`; submodule checkouts stay unchanged. ret-sync and BinExport build directly.
 - **Directory names matter:** keep extension names from their zips and the `GhidrAssist`, `plugin-ghidra`, and `GhidraFindcrypt` submodule paths. Ghidra requires each jar name to start with its extension directory name; `make verify-extensions` checks class loading.
-- **Built zips** are collected in `dist/packages/`, one per artifact; the subprojects' own `dist/` folders are emptied of current-version zips.
 - **Rebuilding:** stages skip existing outputs; extensions rebuild when their submodule commit or compatibility patch changes, or when their zip is missing. Run `make clean`, or delete one extension under `dist/.../Ghidra/Extensions/`, to rebuild.

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -6,6 +7,8 @@ from pathlib import Path
 REA_VERSION = "6.3.0"
 GHIDRA_VERSION = "12.2"
 POLICY_RELATIVE_PATH = Path("dist/ghidra/GhidraInstallationPolicy.js")
+POLICY_ORIGINAL_SHA256 = "6ef0703237fe6c47ebed13abb5bf91fa3bf9a559ab8c51626c16f691ce927c17"
+POLICY_PATCHED_SHA256 = "3476caaa30fdb62b3a88f2e75d309e01d16bd02f5307088f012e999a0b055999"
 
 
 class PatchError(RuntimeError):
@@ -66,6 +69,11 @@ def patch_package(package_root: Path, ghidra_version: str) -> bool:
     policy_path = package_root / POLICY_RELATIVE_PATH
     original = policy_path.read_text(encoding="utf-8")
     patched = patch_policy(original, ghidra_version)
+    original_hash = hashlib.sha256(original.encode("utf-8")).hexdigest()
+    patched_hash = hashlib.sha256(patched.encode("utf-8")).hexdigest()
+    if original_hash not in (POLICY_ORIGINAL_SHA256, POLICY_PATCHED_SHA256) or \
+            patched_hash != POLICY_PATCHED_SHA256:
+        raise PatchError("unexpected REA policy source; full-source SHA-256 mismatch")
     if patched == original:
         return False
     policy_path.write_text(patched, encoding="utf-8")
