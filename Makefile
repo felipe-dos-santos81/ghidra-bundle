@@ -58,12 +58,20 @@ JAVA25_HOME := $(shell /usr/libexec/java_home -F -v 25 2>/dev/null)
 else
 JAVA25_HOME := $(shell for j in "$$JAVA_HOME" /usr/lib/jvm/*25* \
 	"$$(dirname "$$(dirname "$$(readlink -f "$$(command -v javac)" 2>/dev/null)")")"; do \
-	[ -n "$$j" ] && [ -x "$$j/bin/java" ] && "$$j/bin/java" -version 2>&1 | grep -q 'version "25' && { readlink -f "$$j"; break; }; \
+	[ -n "$$j" ] && [ -x "$$j/bin/java" ] && [ -x "$$j/bin/javac" ] && \
+	"$$j/bin/java" -version 2>&1 | grep -q 'version "25' && { readlink -f "$$j"; break; }; \
 	done)
 endif
 endif
 export JAVA_HOME := $(JAVA25_HOME)
 export PATH := $(JAVA25_HOME)/bin:$(HOME)/.local/bin:$(HOME)/.cargo/bin:$(PATH)
+
+# $(call jdk_usable,home): succeeds when <home>/bin/java and <home>/bin/javac are
+# executable and both report major $(JAVA_MAJOR); a JRE-only or wrong-major home fails.
+jdk_usable = [ -n "$(strip $(1))" ] && [ -x "$(strip $(1))/bin/java" ] && \
+	[ -x "$(strip $(1))/bin/javac" ] && \
+	"$(strip $(1))/bin/java" -version 2>&1 | grep -q 'version "$(JAVA_MAJOR)' && \
+	"$(strip $(1))/bin/javac" -version 2>&1 | grep -q ' $(JAVA_MAJOR)'
 
 # Message helpers: $(OK) "text", $(WARN) "text", $(ERR) "text", $(TICK) "label" "detail"
 OK = printf '\033[32m%s\033[0m\n'
@@ -94,7 +102,7 @@ help: ## Show this help
 
 00-deps: ## Install missing OS packages (apt or brew) and uv
 	@if [ "$(UNAME_S)" = "Darwin" ]; then \
-		[ -d "$(JAVA25_HOME)" ] || brew install --cask temurin@25; \
+		$(call jdk_usable,$(JAVA25_HOME)) || brew install --cask temurin@25; \
 		for p in maven:mvn python@3.12:python3 uv:uv git:git coreutils:gtimeout; do \
 			command -v $${p#*:} >/dev/null 2>&1 || brew install $${p%%:*}; \
 		done; \
@@ -103,7 +111,7 @@ help: ## Show this help
 		command -v clang >/dev/null 2>&1 || xcode-select --install; \
 	else \
 		PKGS=""; \
-		[ -d "$(JAVA25_HOME)" ] || PKGS+=" openjdk-25-jdk"; \
+		$(call jdk_usable,$(JAVA25_HOME)) || PKGS+=" openjdk-25-jdk"; \
 		for p in maven:mvn clang:clang git:git curl:curl; do \
 			command -v $${p#*:} >/dev/null 2>&1 || PKGS+=" $${p%%:*}"; \
 		done; \
@@ -122,9 +130,8 @@ check_tool = command -v $(1) >/dev/null 2>&1 || { $(ERR) "$(2) not found on PATH
 	$(TICK) "$(2)" "$$($(3) 2>&1 | head -n 1)"
 
 00-env: ## Check host prerequisites (JDK 25, Maven, Clang, Python 3, uv, Git, curl, GNU timeout; StormLib and Node.js optional)
-	@[ -d "$(JAVA25_HOME)" ] || { $(ERR) "JDK 25 not found (run 'make deps')"; exit 1; }
-	@"$(JAVA25_HOME)/bin/java" -version 2>&1 | grep -q 'version "$(JAVA_MAJOR)' || \
-		{ $(ERR) "JAVA25_HOME is not a JDK $(JAVA_MAJOR) install: $(JAVA25_HOME)"; exit 1; }
+	@$(call jdk_usable,$(JAVA25_HOME)) || \
+		{ $(ERR) "JAVA25_HOME is not a usable JDK $(JAVA_MAJOR) (needs executable bin/java and bin/javac reporting major $(JAVA_MAJOR)): '$(JAVA25_HOME)' (run 'make deps')"; exit 1; }
 	@$(TICK) "JDK 25" "$(JAVA25_HOME)"
 	@$(call check_tool,mvn,Maven,mvn -version)
 	@$(call check_tool,clang,Clang,clang --version)
@@ -181,7 +188,7 @@ PORTABLE_BLOCK = '\# --- Portable Mode Overrides ---' \
 	@if grep -qs '^# --- Portable Mode Overrides ---' "$(LAUNCH_PROPS)"; then \
 		EXPECTED=$$(printf '%s\n' $(PORTABLE_BLOCK)); \
 		if [ "$$(sed -n '/^# --- Portable Mode Overrides ---/,$$p' "$(LAUNCH_PROPS)")" != "$$EXPECTED" ]; then \
-			[ -d "$(JAVA25_HOME)" ] || { $(ERR) "JDK 25 not found (run 'make deps')"; exit 1; }; \
+			$(call jdk_usable,$(JAVA25_HOME)) || { $(ERR) "JDK 25 not found (run 'make deps')"; exit 1; }; \
 			{ sed '/^# --- Portable Mode Overrides ---/,$$d' "$(LAUNCH_PROPS)" && echo "$$EXPECTED"; } \
 				> "$(LAUNCH_PROPS).tmp" && mv "$(LAUNCH_PROPS).tmp" "$(LAUNCH_PROPS)" || exit 1; \
 			$(OK) "Rewrote the portable-mode block in launch.properties for $(INSTALL_DIR)."; \
@@ -445,7 +452,7 @@ install: $(PIPELINE) ## Run the full pipeline (all stages above, in order)
 	@$(OK) "Ghidra Bundle installed. Run 'make run' to launch Ghidra."
 
 test: ## Run the sanity test suite (fixtures, extensions, GhidraMCP, dist, BinExport, Jython, PyGhidra, REA, portable mode)
-	@[ -d "$(JAVA25_HOME)" ] || { $(ERR) "JDK 25 not found (run 'make deps')"; exit 1; }
+	@$(call jdk_usable,$(JAVA25_HOME)) || { $(ERR) "JDK 25 not found (run 'make deps')"; exit 1; }
 	@PACKAGES_DIR="$(PACKAGES_DIR)" REA_BIN="$(REA_BIN)" tests/run-sanity.sh "$(INSTALL_DIR)" "$(JAVA25_HOME)"
 
 run: ## Launch Ghidra (fails if port 8089 is already in use)

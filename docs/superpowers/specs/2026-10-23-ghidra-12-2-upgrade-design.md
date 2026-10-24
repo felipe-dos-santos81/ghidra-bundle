@@ -88,7 +88,10 @@ still stops implementation rather than silently expanding scope.
   `JAVA21_HOME` with `JAVA25_HOME`; continue exporting the selected JDK as
   `JAVA_HOME` and placing its `bin` first on `PATH`.
 - Resolve JDK 25 through `JAVA25_HOME`, macOS `java_home`, the existing Linux
-  search strategy updated for 25, or `javac` on `PATH`.
+  search strategy updated for 25, or `javac` on `PATH`. Every resolution and
+  guard requires a full JDK: `bin/java` and `bin/javac` must both exist and
+  report major 25 (the reusable `jdk_usable` check in the Makefile, mirrored in
+  `build-ghidra.sh`), so a JRE-only or wrong-major home is rejected, not used.
 - Install `temurin@25` through Homebrew or `openjdk-25-jdk` through apt when
   missing, matching the existing dependency-stage behavior. On an apt-based
   distribution that does not offer `openjdk-25-jdk`, the user instead installs a
@@ -96,6 +99,13 @@ still stops implementation rather than silently expanding scope.
   No additional package repository is introduced.
 - Update `build-ghidra.sh`, stage `00-env`, portable `JAVA_HOME_OVERRIDE`, REA's
   generated wrapper and test-script usage text to require/use JDK 25.
+- `build-ghidra.sh` keeps the dependency cache (`ghidra/dependencies/flatRepo`)
+  in sync with the source checkout: it fetches only when the cache is missing or
+  `flatRepo/.bundle-source` differs from the submodule's `git rev-parse HEAD`
+  (a missing marker is a mismatch), writes the marker only after a successful
+  fetch, and relies on the submodule's `.gitignore` (`flatRepo/`) so the marker
+  never dirties the checkout. This stops an existing checkout upgraded to a new
+  Ghidra version from silently reusing the previous version's dependencies.
 
 The bundle deliberately selects JDK 25 even though Ghidra accepts later JDKs;
 this keeps the tested toolchain explicit and reproducible.
@@ -129,7 +139,11 @@ The script is fail-closed: it accepts only the pinned version `12.2` (12.2.1
 and others are rejected), requires every anchor at its exact occurrence count,
 recognizes an already-patched source so reruns are idempotent, rejects
 missing/duplicated/mixed/partial forms, and replaces the destination only after
-every patch validates, so a failed run never leaves a half-patched tree.
+every patch validates. The guarantee is deliberately narrower than atomic
+replacement: no original is modified and a failed run stops the stage before
+the destination is replaced, but deleting/copying/writing the generated
+destination is not atomic, so an interrupted run can leave it missing or
+partial until the stage reruns and rebuilds it from the pristine source.
 
 The six covered transformations: GhidraMCP drops the removed second
 `DataTypeManager.remove` argument; lx-loader removes the removed `Writeable`
