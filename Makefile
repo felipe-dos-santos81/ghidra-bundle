@@ -315,6 +315,7 @@ endef
 11-install-binexport: 03-install-ghidra ## Build and install BinExport (exports for BinDiff)
 	$(call install_extension,BinExport,binexport,binexport/java/dist/ghidra_$(GHIDRA_VERSION)_*_BinExport.zip,,java)
 
+# PlayStation loaders build from their submodule sources; neither needs a 12.2 API patch.
 12-install-emotionengine: 03-install-ghidra ## Build and install Ghidra Emotion Engine: Reloaded (PlayStation 2)
 	$(call install_extension,ghidra-emotionengine-reloaded,ghidra-emotionengine-reloaded,ghidra-emotionengine-reloaded/dist/ghidra_$(GHIDRA_VERSION)_*_ghidra-emotionengine-reloaded.zip)
 
@@ -529,7 +530,8 @@ clean: ## Remove dist/, .venv/, REA's install in .rea/ and all build outputs
 		python/bundle-mpq/build python/bundle-mpq/bundle_mpq.egg-info \
 		GhidrAssist/dist GhidrAssist/build GhidrAssist/.gradle \
 		plugin-ghidra/dist plugin-ghidra/build plugin-ghidra/.gradle \
-		ghidra-emotionengine-reloaded/dist ghidra-emotionengine-reloaded/build ghidra-emotionengine-reloaded/.gradle \
+		ghidra-emotionengine-reloaded/dist ghidra-emotionengine-reloaded/build \
+		ghidra-emotionengine-reloaded/.gradle \
 		GhidraPS4Loader/dist GhidraPS4Loader/build GhidraPS4Loader/.gradle
 
 distclean: clean ## clean, then de-initialize all submodules
