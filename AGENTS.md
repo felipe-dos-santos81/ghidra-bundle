@@ -6,7 +6,7 @@ Operational context, invariants and conventions for AI coding agents working in 
 
 ## 1. Project Overview
 
-`ghidra-bundle` builds an isolated, reproducible **Ghidra 12.2** from source, with eight extensions, the Jython runtime, D2GridraTools scripts, a PyGhidra venv and a local Model Context Protocol (MCP) bridge:
+`ghidra-bundle` builds an isolated, reproducible **Ghidra 12.2** from source, with ten extensions, the Jython runtime, D2GridraTools scripts, a PyGhidra venv and a local Model Context Protocol (MCP) bridge:
 - **Ghidra 12.2**: built headlessly with Gradle from the `Ghidra_12.2_build` tag.
 - **GhidraMCP**: HTTP server plugin (port 8089) and Python bridge (`bridge-mcp-ghidra`).
 - **lx-loader**: Linear Executable (`LE`/`LX`) loader (DOS/4GW, OS/2, VxD).
@@ -16,6 +16,8 @@ Operational context, invariants and conventions for AI coding agents working in 
 - **ret-sync**: syncs Ghidra with x64dbg/WinDbg (127.0.0.1:9100, only when enabled).
 - **GhidraFindcrypt**: analyzer for crypto constants.
 - **BinExport**: exporter for BinDiff.
+- **Ghidra Emotion Engine: Reloaded**: PlayStation 2 (R5900) language, ELF extension, analyzers and PCSX2 save-state importer. Upstream supports Ghidra 12.2; no source patch.
+- **GhidraPS4Loader** (fork): PlayStation 4 ELF loader, ported to the Ghidra 12.2 loader API.
 - **D2GridraTools** + **Jython**: Diablo 2 1.14d scripts, run under Ghidra's optional Jython extension.
 - **PyGhidra + `bundle_mpq`**: PyGhidra's venv in `portable/`, with a ctypes StormLib MPQ reader (`python/bundle-mpq`).
 - **REA** (`rea-agents` 6.3.0, optional): CLI and MCP server (`rea`) that analyzes files through this Ghidra headlessly, installed in `.rea/`. Needs Node.js.
@@ -46,10 +48,11 @@ Operational context, invariants and conventions for AI coding agents working in 
   - `lx-loader/` (`lib/lx-loader.jar`)
   - `dos-toolbox/` (`lib/dos-toolbox.jar`)
   - `GhidrAssist/`, `plugin-ghidra/`, `retsync/`, `GhidraFindcrypt/`, `BinExport/` (each `lib/<same name>.jar`)
+  - `ghidra-emotionengine-reloaded/` and `GhidraPS4Loader/` (`lib/<same name>.jar`)
   - `Jython/` (from Ghidra's own `Extensions/Ghidra/` zip) and `D2GridraTools/` (assembled by `scripts/install-d2gridratools.sh`)
 - **Never rename an extension directory.** Outside development mode, Ghidra's `ClassSearcher` only scans `<ext>/lib/<jar>.jar` when the jar name starts with the directory name. A renamed extension still shows its scripts but silently loses its loaders, analyzers and plugins.
-- **Submodule paths `GhidrAssist`, `plugin-ghidra` and `GhidraFindcrypt` must not change**: those projects have no `settings.gradle`, so Gradle names the extension (zip, directory and jar) after the checkout directory.
-- `make verify-extensions` (a pipeline stage before `13-pyghidra`, and run again by `make test`) uses `ghidra_scripts/VerifyExtensions.java` to confirm headlessly that each extension's key classes are loaded. Add a check there when adding an extension.
+- **Submodule paths `GhidrAssist`, `plugin-ghidra`, `GhidraFindcrypt`, `ghidra-emotionengine-reloaded` and `GhidraPS4Loader` must not change**: those projects have no `settings.gradle`, so Gradle names the extension (zip, directory and jar) after the checkout directory.
+- `make verify-extensions` (a pipeline stage before `15-pyghidra`, and run again by `make test`) uses `ghidra_scripts/VerifyExtensions.java` to confirm headlessly that each extension's key classes and the `r5900` language are loaded. Add a check there when adding an extension.
 
 ### 2.3 Submodules & Versions
 - Upstream repositories are shallow submodules:
@@ -63,6 +66,8 @@ Operational context, invariants and conventions for AI coding agents working in 
   - `ret-sync` (bootleg/ret-sync, `master`; the Ghidra extension is in `ext_ghidra/`, and upstream commits old 10.x zips to `ext_ghidra/dist/`)
   - `GhidraFindcrypt` (antoniovazquezblanco/GhidraFindcrypt, `main`)
   - `binexport` (google/binexport, `main`; the Ghidra extension is in `java/`)
+  - `ghidra-emotionengine-reloaded` (chaoticgd, tag `v2.1.39`): PlayStation 2 support; upstream added Ghidra 12.2 support in that release. The optional `stdump` binary used by the STABS analyzer is not bundled.
+  - `GhidraPS4Loader` (felipe-dos-santos81/GhidraPS4Loader, `ghidra-12.2`): jogolden/GhidraPS4Loader `master` ported to the Ghidra 12.2 loader API and pinned to tag `bundle-pin-2ddb571`. Never force-push the branch or delete the tag; point it back at upstream if the port is merged there.
   - `D2GridraTools` (dzik87/D2GridraTools, `main`): **unlicensed**. Fetched only; never modify, commit to or redistribute its files.
 - Sync with `git submodule sync --recursive` then `git submodule update --init --recursive --depth 1` (`make checkout`); the sync carries `.gitmodules` URL changes into existing clones. `distclean` uses `git submodule deinit -f --all`.
 - `GHIDRA_VERSION` in the `Makefile` is the single version pin. Stage 02 fails if it differs from `application.version` in the `ghidra` submodule. `build-ghidra.sh` reads the version from the submodule.
@@ -97,7 +102,7 @@ Operational context, invariants and conventions for AI coding agents working in 
 - REA has no NE, LE or LX support and imports DOS MZ with Ghidra's stock `MzLoader`, so GhidraMCP with lx-loader and GhidraDosToolbox stays the path for that work. It rejects such a file only when the MZ header points at the NE/LE/LX header. A DOS/4GW-bound program (the LE follows the extender stub) is admitted as plain MZ, and REA then analyzes only the 16-bit stub, without a warning.
 
 ### 2.9 Extension Source Compatibility (Ghidra 12.2 API breaks)
-- Ghidra 12.2 removed or changed APIs that six extensions use. Stages 04–08 and 10 first run `scripts/prepare-extension-source.py`, which copies the extension's source into a fresh, git-ignored tree under `dist/build/<ext>/` (skipping `.git`, `.gradle`, `build`, `target`, `dist`, `__pycache__`), applies that extension's exact 12.2 replacements there, and leaves the original submodule byte-identical. The script is fail-closed: it accepts only the pinned Ghidra version (12.2; 12.2.1 and others are rejected), requires every anchor at its exact occurrence count, recognizes an already-patched source (idempotence), rejects missing/duplicated/mixed/partial forms, and replaces the destination only after all patches validate. The guarantee is precise: no original is ever modified, and a failed run stops the stage before the destination is replaced — but deleting/copying/writing the destination is not atomic, so an interrupted run can leave the generated copy missing or partial until the stage reruns (it is rebuilt from the pristine source). Ret-sync and BinExport build directly, without source patches.
+- Ghidra 12.2 removed or changed APIs that six extensions use. Stages 04–08 and 10 first run `scripts/prepare-extension-source.py`, which copies the extension's source into a fresh, git-ignored tree under `dist/build/<ext>/` (skipping `.git`, `.gradle`, `build`, `target`, `dist`, `__pycache__`), applies that extension's exact 12.2 replacements there, and leaves the original submodule byte-identical. The script is fail-closed: it accepts only the pinned Ghidra version (12.2; 12.2.1 and others are rejected), requires every anchor at its exact occurrence count, recognizes an already-patched source (idempotence), rejects missing/duplicated/mixed/partial forms, and replaces the destination only after all patches validate. The guarantee is precise: no original is ever modified, and a failed run stops the stage before the destination is replaced — but deleting/copying/writing the destination is not atomic, so an interrupted run can leave the generated copy missing or partial until the stage reruns (it is rebuilt from the pristine source). Ret-sync, BinExport, Ghidra Emotion Engine: Reloaded and the GhidraPS4Loader fork build directly, without source patches.
 - Covered transformations: GhidraMCP drops the removed second `DataTypeManager.remove` argument; lx-loader drops the removed `Writeable` interface from `DOSHeader` while retaining its public `write` method; dos-toolbox simplifies a `DosLoader` condition whose `OldDOSHeader.hasNewExeHeader()`/`hasPeHeader()` checks were always false; GhidrAssist drops two obsolete `@Override`s on the removed `TaskMonitor.checkCanceled`/`clearCanceled` aliases; GhidraFindcrypt renames `checkCanceled()` to `checkCancelled()`; RevEng.AI injects the `PluginTool` as the `ServiceProvider` for `BrowserLoader.display` and `GhidraRevengService`, including a real provider assertion in its existing plugin test.
 - Rebuild identity: `install_extension`'s optional 6th argument names the original submodule whose `git rev-parse HEAD` goes into `<ext>/.bundle-source`; the optional 7th is the patch identity written to `<ext>/.bundle-patch`. Patched stages pass `<extension>-$(shell git hash-object scripts/prepare-extension-source.py)`, so editing the script forces every patched extension to rebuild; the build copy is regenerated on every stage run, so patched sources cannot go stale.
 - To extend the mechanism for a new API break: add the extension's exact old→new anchors (with counts) to `EXTENSIONS` in `scripts/prepare-extension-source.py`, mirror a stage's `*_BUILD_DIR`/`*_PATCH_ID` wiring under `dist/build/`, add tests to `tests/test_prepare_extension_source.py`, and add its real zip output directory to `BUILD_OUTPUTS` in `tests/run-sanity.sh` (which guards both the original build-output dirs and the actual `dist/build/` copies). A break without an exact, tested transformation is still a stop, not a guess.
@@ -122,15 +127,17 @@ Operational context, invariants and conventions for AI coding agents working in 
 | `09` | `09-install-retsync` (`install-retsync`) | Builds and installs ret-sync (`ext_ghidra/`) |
 | `10` | `10-install-findcrypt` (`install-findcrypt`) | Builds and installs GhidraFindcrypt |
 | `11` | `11-install-binexport` (`install-binexport`) | Builds and installs BinExport (`java/`) |
-| `12` | `12-install-scripts` (`install-scripts`) | Installs Ghidra's Jython extension and assembles D2GridraTools |
+| `12` | `12-install-emotionengine` (`install-emotionengine`) | Builds and installs Ghidra Emotion Engine: Reloaded (PlayStation 2) |
+| `13` | `13-install-ps4loader` (`install-ps4loader`) | Builds and installs GhidraPS4Loader (PlayStation 4 ELF) |
+| `14` | `14-install-scripts` (`install-scripts`) | Installs Ghidra's Jython extension and assembles D2GridraTools |
 | — | `verify-extensions` | Checks headlessly that every extension's key classes load |
-| `13` | `13-pyghidra` (`pyghidra`) | Sets up PyGhidra's venv in `portable/` with `bundle_mpq` |
-| `14` | `14-venv` (`venv`) | Creates `.venv` and installs `bridge-mcp-ghidra` |
-| `15` | `15-register-mcp` (`register-mcp`) | Registers `ghidra` with opencode (atomic JSON write; a config that is not plain JSON, such as JSONC, is left unchanged with a warning) and Claude Code (`claude mcp add --scope user`, skipped if `claude` is absent), through the `register_mcp` macro |
-| `16` | `16-install-rea` (`install-rea`) | Installs REA 6.3.0 from its lockfile (`npm ci`), applies the Ghidra 12.2 compatibility patch, writes the `.rea/rea` wrapper and registers `rea` (`register_mcp`); warns and skips without suitable Node.js or when npm fails |
-| — | `test` | Sanity suite (`tests/run-sanity.sh`), in sections: `env`, `extensions`, `fixtures` (ELF/DOS/LE via `SanityCheck.java`), `mcp` (GhidraMCP over HTTP on `TEST_MCP_PORT`, 18089), `dist`, `binexport`, `portable`, `jython`, `pyghidra`, `rea`. `SANITY_ONLY=dist,pyghidra make test` runs a subset |
+| `15` | `15-pyghidra` (`pyghidra`) | Sets up PyGhidra's venv in `portable/` with `bundle_mpq` |
+| `16` | `16-venv` (`venv`) | Creates `.venv` and installs `bridge-mcp-ghidra` |
+| `17` | `17-register-mcp` (`register-mcp`) | Registers `ghidra` with opencode (atomic JSON write; a config that is not plain JSON, such as JSONC, is left unchanged with a warning) and Claude Code (`claude mcp add --scope user`, skipped if `claude` is absent), through the `register_mcp` macro |
+| `18` | `18-install-rea` (`install-rea`) | Installs REA 6.3.0 from its lockfile (`npm ci`), applies the Ghidra 12.2 compatibility patch, writes the `.rea/rea` wrapper and registers `rea` (`register_mcp`); warns and skips without suitable Node.js or when npm fails |
+| — | `test` | Sanity suite (`tests/run-sanity.sh`), in sections: `env`, `extensions`, `fixtures` (i386 ELF/DOS/LE/PS2 ELF/PS4 ELF via `SanityCheck.java`), `mcp` (GhidraMCP over HTTP on `TEST_MCP_PORT`, 18089), `dist`, `binexport`, `portable`, `jython`, `pyghidra`, `rea`. `SANITY_ONLY=dist,pyghidra make test` runs a subset |
 
-Runtime and maintenance: `install` (runs `$(PIPELINE)`, all of the above, with `verify-extensions` after stage 12 so a broken extension stops the install before MCP registration, ending with `test`), `run`, `run-bridge`, `verify` (probes `http://127.0.0.1:8089/check_connection`), `clean`, `distclean`.
+Runtime and maintenance: `install` (runs `$(PIPELINE)`, all of the above, with `verify-extensions` after stage 14 so a broken extension stops the install before MCP registration, ending with `test`), `run`, `run-bridge`, `verify` (probes `http://127.0.0.1:8089/check_connection`), `clean`, `distclean`.
 
 ---
 

@@ -1,0 +1,6 @@
+# ee.elf: 32-bit PS2 Emotion Engine ELF, imported by Ghidra's ELF loader.
+loader Executable and Linking Format (ELF)
+language r5900:LE:32:default   # selected by E_MIPS_MACH_5900 via r5900.opinion
+entry 00100000
+bytes 00100000 3412023c       # lui v0,0x1234
+function entry contains 0x12345678

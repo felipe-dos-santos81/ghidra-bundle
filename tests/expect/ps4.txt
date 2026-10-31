@@ -1,0 +1,5 @@
+# ps4.elf: 64-bit PS4-style ELF, imported with GhidraPS4Loader.
+loader PlayStation 4 ELF
+language x86:LE:64:default
+block ram 00000000
+bytes 00004010 b878563412c3   # code copied from file offset 0x4010

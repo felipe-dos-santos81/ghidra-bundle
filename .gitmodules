@@ -47,3 +47,13 @@
 	url = https://github.com/felipe-dos-santos81/plugin-ghidra.git
 	branch = portable-settings
 	shallow = true
+[submodule "ghidra-emotionengine-reloaded"]
+	path = ghidra-emotionengine-reloaded
+	url = https://github.com/chaoticgd/ghidra-emotionengine-reloaded.git
+	branch = main
+	shallow = true
+[submodule "GhidraPS4Loader"]
+	path = GhidraPS4Loader
+	url = https://github.com/felipe-dos-santos81/GhidraPS4Loader.git
+	branch = ghidra-12.2
+	shallow = true

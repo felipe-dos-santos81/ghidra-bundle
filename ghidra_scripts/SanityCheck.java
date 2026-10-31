@@ -129,6 +129,11 @@ public class SanityCheck extends GhidraScript {
 				String got = currentProgram.getExecutableFormat();
 				return join(t, 1).equals(got) ? null : got;
 			}
+			case "language": {
+				need(t.length == 2, "language <id>");
+				String got = currentProgram.getLanguageID().toString();
+				return got.equals(t[1]) ? null : got;
+			}
 			case "block": {
 				need(t.length == 3, "block <name> <start>");
 				MemoryBlock block = block(t[1]);

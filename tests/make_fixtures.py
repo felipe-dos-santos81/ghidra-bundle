@@ -5,6 +5,8 @@ Usage: python3 -I tests/make_fixtures.py OUTPUT_DIR
 
   dos.exe  16-bit DOS MZ with one segment relocation (GhidraDosToolbox DosLoader)
   le.exe   32-bit LE behind an MZ stub with one 32-bit fixup (lx-loader LeLoader)
+  ee.elf   32-bit PS2 Emotion Engine ELF (Ghidra's ELF loader + R5900 language)
+  ps4.elf  64-bit PS4-style ELF (GhidraPS4Loader; PT_LOAD + Sony dynamic data)
 
 Every byte is fixed, so tests/expect/*.txt can name exact addresses.
 """
@@ -118,13 +120,91 @@ def build_dos() -> bytes:
     return header + relocation + module
 
 
+def build_ee() -> bytes:
+    """Minimal 32-bit PS2 EE ELF: one PT_LOAD code section at 0x00100000.
+
+    e_flags combines EF_MIPS_ARCH_2 (0x20000000) with E_MIPS_MACH_5900
+    (0x00920000), which selects the extension's r5900:LE:32:default language
+    through data/languages/r5900.opinion.
+    """
+    code = struct.pack("<4I",
+                       0x3C021234,  # 00100000 lui v0,0x1234
+                       0x34425678,  # 00100004 ori v0,v0,0x5678
+                       0x03E00008,  # 00100008 jr ra
+                       0x00000000)  # 0010000C nop (delay slot)
+    shstrtab = b"\0.text\0.shstrtab\0"
+    shoff = 0x34 + 32                     # ELF header + one program header
+    shstr_off = shoff + 3 * 40
+    text_off = 0x1000
+
+    elf = bytearray(text_off + len(code))
+    elf[0:16] = b"\x7fELF\x01\x01\x01" + bytes(9)   # 32-bit, little-endian, v1
+    struct.pack_into("<HHIIIIIHHHHHH", elf, 16,
+                     2, 8, 1,           # ET_EXEC, EM_MIPS, EV_CURRENT
+                     0x00100000,        # e_entry
+                     0x34, shoff,       # e_phoff, e_shoff
+                     0x20920000,        # EF_MIPS_ARCH_2 | E_MIPS_MACH_5900
+                     52, 32, 1,         # e_ehsize, e_phentsize, e_phnum
+                     40, 3, 2)          # e_shentsize, e_shnum, e_shstrndx
+    struct.pack_into("<8I", elf, 0x34,
+                     1, text_off, 0x00100000, 0x00100000,
+                     len(code), len(code), 5, 0x1000)  # PT_LOAD, R+X, 4 KiB align
+    struct.pack_into("<10I", elf, shoff + 40,
+                     1, 1, 0x6, 0x00100000, text_off, len(code), 0, 0, 4, 0)
+    struct.pack_into("<10I", elf, shoff + 80,
+                     7, 3, 0, 0, shstr_off, len(shstrtab), 0, 0, 1, 0)
+    elf[shstr_off:shstr_off + len(shstrtab)] = shstrtab
+    elf[text_off:text_off + len(code)] = code
+    return bytes(elf)
+
+
+def build_ps4() -> bytes:
+    """Minimal PS4-style ELF64: PT_LOAD, PT_DYNAMIC and PT_SCE_DYNLIBDATA.
+
+    GhidraPS4Loader maps the raw file at address 0, labels the entry point at
+    0x4000 + e_entry, and reads the Sony dynamic data for NID imports. e_entry is
+    relative here (0x10) and the code sits at file offset 0x4010.
+    """
+    code = bytes([0xB8, 0x78, 0x56, 0x34, 0x12, 0xC3])  # mov eax,0x12345678; ret
+    code_off = 0x4010
+    dyn_off = 0x3000
+    phnum, phoff = 3, 64
+    shstrtab = b"\0.text\0.shstrtab\0"
+    shoff = phoff + phnum * 56
+    shstr_off = shoff + 3 * 64
+
+    elf = bytearray(code_off + len(code))
+    elf[0:16] = b"\x7fELF\x02\x01\x01" + bytes(9)   # 64-bit, little-endian, v1
+    struct.pack_into("<HHIQQQIHHHHHH", elf, 16,
+                     0xFE18, 62, 1,      # ET_SCE_DYNAMIC, EM_X86_64, EV_CURRENT
+                     0x10,               # e_entry (relative to 0x4000)
+                     phoff, shoff, 0,    # e_phoff, e_shoff, e_flags
+                     64, 56, phnum,      # e_ehsize, e_phentsize, e_phnum
+                     64, 3, 2)           # e_shentsize, e_shnum, e_shstrndx
+    struct.pack_into("<IIQQQQQQ", elf, phoff,
+                     1, 5, 0x4000, 0x400000, 0x400000, 0x20, 0x20, 0x1000)
+    struct.pack_into("<IIQQQQQQ", elf, phoff + 56,
+                     2, 4, dyn_off, 0x403000, 0x403000, 16, 16, 8)
+    struct.pack_into("<IIQQQQQQ", elf, phoff + 112,
+                     0x61000000, 4, dyn_off, 0x403000, 0x403000, 16, 16, 8)
+    struct.pack_into("<QQ", elf, dyn_off, 0, 0)      # DT_NULL
+    struct.pack_into("<IIQQQQIIQQ", elf, shoff + 64,
+                     1, 1, 0x6, 0x400010, code_off, len(code), 0, 0, 16, 0)
+    struct.pack_into("<IIQQQQIIQQ", elf, shoff + 128,
+                     7, 3, 0, 0, shstr_off, len(shstrtab), 0, 0, 1, 0)
+    elf[shstr_off:shstr_off + len(shstrtab)] = shstrtab
+    elf[code_off:code_off + len(code)] = code
+    return bytes(elf)
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print(__doc__, file=sys.stderr)
         return 2
     out = Path(sys.argv[1])
     out.mkdir(parents=True, exist_ok=True)
-    for name, build in (("dos.exe", build_dos), ("le.exe", build_le)):
+    for name, build in (("dos.exe", build_dos), ("le.exe", build_le), ("ee.elf", build_ee),
+                        ("ps4.elf", build_ps4)):
         path = out / name
         path.write_bytes(build())
         print(f"wrote {path} ({path.stat().st_size} bytes)")

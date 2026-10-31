@@ -57,14 +57,15 @@ make test ──► tests/run-sanity.sh <install dir> <JDK home>
 | Unit | Responsibility | Depends on |
 | :--- | :--- | :--- |
 | `tests/fixtures/sample.c` | Tiny C source with a known constant, a call and a global | clang (existing prerequisite) |
-| `tests/make_fixtures.py` | Writes `dos.exe` and `le.exe` deterministically, byte by byte | Python 3 standard library |
+| `tests/make_fixtures.py` | Writes `dos.exe`, `le.exe`, `ee.elf` and `ps4.elf` deterministically, byte by byte | Python 3 standard library |
 | `tests/expect/<fixture>.txt` | Facts each fixture must satisfy | — |
 | `ghidra_scripts/SanityCheck.java` | Generic fact checker; prints results; writes decompiled C | Ghidra API (`DecompInterface`) |
 | `tests/snapshots/<fixture>/<function>.c` | Committed reference decompilation | — |
 | `tests/run-sanity.sh` | Orchestration, timeouts, cleanup, summary | bash, `analyzeHeadless`, java, curl, python3 |
 
 Adding a fixture means adding a generator (or source file), an expectations
-file and a runner entry; `SanityCheck.java` does not change.
+file and a runner entry; `SanityCheck.java` only changes when a new fact type
+is needed (as with `language`).
 
 ## 4. Fixtures
 
@@ -113,6 +114,31 @@ Entry point: object 1, offset 0. The LE must be accepted by lx-loader's parser
 name table); the implementation builds it incrementally and verifies each step
 against lx-loader before writing expectations.
 
+### 4.4 `ee.elf` — 32-bit PS2 Emotion Engine ELF
+
+Built by `make_fixtures.py`: an ELF32 little-endian executable with
+`e_machine = EM_MIPS` and `e_flags = 0x20920000` (`EF_MIPS_ARCH_2` plus
+`E_MIPS_MACH_5900`). The flags select Ghidra Emotion Engine: Reloaded's
+`r5900:LE:32:default` language through `r5900.opinion`; the single `PT_LOAD`
+section holds `lui v0,0x1234; ori v0,v0,0x5678; jr ra; nop` at `0x00100000`.
+Imported with Ghidra's default loader choice (expected: ELF).
+
+Required facts: `loader` (Ghidra's ELF loader name), `language` (`r5900`),
+`entry`, `bytes` for the first instruction, and `function entry contains
+0x12345678`, which proves the R5900 disassembler and decompiler ran.
+
+### 4.5 `ps4.elf` — 64-bit PS4-style ELF through GhidraPS4Loader
+
+Built by `make_fixtures.py`: an ELF64 little-endian executable with
+`e_type = ET_SCE_DYNAMIC`, `e_machine = EM_X86_64`, one `PT_LOAD` code segment,
+`PT_DYNAMIC` (a single `DT_NULL`) and `PT_SCE_DYNLIBDATA`. The loader maps the
+raw file at address 0, so the code sits at file offset `0x4010` and `e_entry` is
+relative (`0x10`). Imported with `-loader GhidraPS4Loader`.
+
+Required facts: `loader` (`PlayStation 4 ELF`), `language` (`x86:LE:64:default`),
+`block ram 00000000`, and `bytes` for the code, which proves the loader ran and
+copied the file into memory.
+
 ## 5. Expectations format
 
 `tests/expect/<fixture>.txt`: one fact per line; blank lines and `#` comments
@@ -122,6 +148,7 @@ address.
 | Fact | Passes when |
 | :--- | :--- |
 | `loader <name>` | `program.getExecutableFormat()` equals `<name>` |
+| `language <id>` | `program.getLanguageID()` equals `<id>` |
 | `block <name> <start>` | a memory block `<name>` starts at `<start>` |
 | `permissions <block> <rwx>` | the block's read/write/execute flags equal `<rwx>` (e.g. `r-x`) |
 | `entry <addr>` | `<addr>` is an external entry point |

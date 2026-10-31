@@ -220,6 +220,8 @@ if want fixtures; then
   if [[ -n "$SAMPLE" ]]; then run_fixture sample "$SAMPLE"; fi
   run_fixture dos "$WORK/fixtures/dos.exe" DosLoader
   run_fixture le "$WORK/fixtures/le.exe" LeLoader
+  run_fixture ee "$WORK/fixtures/ee.elf"
+  run_fixture ps4 "$WORK/fixtures/ps4.elf" GhidraPS4Loader
 fi
 
 # ── 3b. GhidraMCP end to end ──────────────────────────────────────────────────
@@ -367,6 +369,8 @@ PACKAGE_PATTERNS=(
   "ghidra_{v}_*_BinExport.zip"
   "ghidra_{v}_*_GhidrAssist.zip"
   "ghidra_{v}_*_plugin-ghidra.zip"
+  "ghidra_{v}_*_ghidra-emotionengine-reloaded.zip"
+  "ghidra_{v}_*_GhidraPS4Loader.zip"
 )
 # Build folders that must hold no current zip once install has moved them. The six
 # API-patched extensions build in disposable copies under dist/build/ (Makefile
@@ -375,7 +379,8 @@ PACKAGE_PATTERNS=(
 # the unpatched ret-sync and BinExport trees.
 BUILD_OUTPUTS=(ghidra/build/dist ghidra-mcp/build/distributions lx-loader/dist dos-toolbox/dist
                ret-sync/ext_ghidra/dist GhidraFindcrypt/dist binexport/java/dist
-               GhidrAssist/dist plugin-ghidra/dist
+               GhidrAssist/dist plugin-ghidra/dist ghidra-emotionengine-reloaded/dist
+               GhidraPS4Loader/dist
                dist/build/ghidra-mcp/build/distributions
                dist/build/lx-loader/dist dist/build/dos-toolbox/dist
                dist/build/GhidrAssist/dist dist/build/plugin-ghidra/dist

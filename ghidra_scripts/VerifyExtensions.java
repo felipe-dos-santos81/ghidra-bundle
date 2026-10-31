@@ -7,11 +7,13 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import ghidra.app.services.Analyzer;
+import ghidra.app.util.bin.format.elf.extend.ElfExtension;
 import ghidra.app.util.exporter.Exporter;
 import ghidra.app.util.opinion.Loader;
 import ghidra.framework.plugintool.Plugin;
 import ghidra.app.script.GhidraScript;
 import ghidra.app.script.GhidraScriptProvider;
+import ghidra.program.util.DefaultLanguageService;
 import ghidra.util.classfinder.ClassSearcher;
 import ghidra.util.classfinder.ExtensionPoint;
 
@@ -31,6 +33,19 @@ public class VerifyExtensions extends GhidraScript {
 		check("Jython", GhidraScriptProvider.class, "JythonScriptProvider");
 		check("GhidrAssist", Plugin.class, "GhidrAssistPlugin");
 		check("plugin-ghidra", Plugin.class, "ReaiAPIServicePlugin");
+		check("ghidra-emotionengine-reloaded", ElfExtension.class, "EE_ElfExtension");
+		check("ghidra-emotionengine-reloaded", Analyzer.class, "MipsR5900AddressAnalyzer");
+		check("ghidra-emotionengine-reloaded", Analyzer.class, "StabsAnalyzer");
+		checkLanguage("ghidra-emotionengine-reloaded", "r5900:LE:32:default");
+		check("GhidraPS4Loader", Loader.class, "GhidraPS4Loader");
+	}
+
+	private void checkLanguage(String extension, String languageId) {
+		boolean found = DefaultLanguageService.getLanguageService()
+				.getLanguageDescriptions(false)
+				.stream()
+				.anyMatch(description -> description.getLanguageID().toString().equals(languageId));
+		println("VERIFY " + (found ? "OK" : "MISSING") + " " + extension + ": language " + languageId);
 	}
 
 	private void check(String extension, Class<? extends ExtensionPoint> kind, String className) {

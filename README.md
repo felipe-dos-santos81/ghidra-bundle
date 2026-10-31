@@ -1,6 +1,6 @@
 # Ghidra Bundle
 
-A reproducible, self-contained **Ghidra 12.2**, built from source with eight extensions, Jython, Diablo 2 scripts, PyGhidra with MPQ support and an MCP bridge for AI assistants. Ghidra runs in portable mode: settings, cache and temp files stay under `dist/`. Every built zip is moved to `dist/packages/`.
+A reproducible, self-contained **Ghidra 12.2**, built from source with ten extensions, Jython, Diablo 2 scripts, PyGhidra with MPQ support and an MCP bridge for AI assistants. Ghidra runs in portable mode: settings, cache and temp files stay under `dist/`. Every built zip is moved to `dist/packages/`.
 
 | Component | What it adds |
 | :--- | :--- |
@@ -13,6 +13,8 @@ A reproducible, self-contained **Ghidra 12.2**, built from source with eight ext
 | [ret-sync](https://github.com/bootleg/ret-sync) | Sync Ghidra with a debugger (x64dbg, WinDbg) |
 | [GhidraFindcrypt](https://github.com/antoniovazquezblanco/GhidraFindcrypt) | Analyzer for crypto constants |
 | [BinExport](https://github.com/google/binexport) | Exporter for BinDiff |
+| [Ghidra Emotion Engine: Reloaded](https://github.com/chaoticgd/ghidra-emotionengine-reloaded) | PlayStation 2 (R5900) disassembly, decompilation and PCSX2 save-state import |
+| [GhidraPS4Loader](https://github.com/jogolden/GhidraPS4Loader) | PlayStation 4 ELF loader; built from [a fork](https://github.com/felipe-dos-santos81/GhidraPS4Loader/tree/ghidra-12.2) ported to Ghidra 12.2 |
 | [D2GridraTools](https://github.com/dzik87/D2GridraTools) | Diablo 2 1.14d scripts, run under Ghidra's Jython extension |
 | PyGhidra + `bundle_mpq` | Python 3 scripting with MPQ archive access (StormLib) |
 | [REA](https://github.com/morluto/rea) 6.3.0 (optional) | CLI and MCP server that analyzes a file through this Ghidra without the GUI; needs Node.js |
@@ -60,7 +62,7 @@ REA cannot analyze LE/LX programs. For DOS/4GW games it analyzes only the 16-bit
 
 ## Testing
 
-`make test` (also the last stage of `make install`) builds three tiny programs: an i386 ELF object, a DOS MZ file and an LE file. It checks their loaders and decompilation, GhidraMCP over HTTP on port 18089 (`TEST_MCP_PORT`), the JDK 25 runtime, packages, BinExport, Jython and the D2 scripts, PyGhidra/MPQ, REA and portable-path isolation. MPQ checks skip without StormLib, and REA integration checks skip when REA is unavailable.
+`make test` (also the last stage of `make install`) builds five fixtures: an i386 ELF object, a DOS MZ file, an LE file, a PS2 Emotion Engine ELF and a PS4 ELF. It checks their loaders (and decompilation where applicable), GhidraMCP over HTTP on port 18089 (`TEST_MCP_PORT`), the JDK 25 runtime, packages, BinExport, Jython and the D2 scripts, PyGhidra/MPQ, REA and portable-path isolation. MPQ checks skip without StormLib, and REA integration checks skip when REA is unavailable.
 
 `tests/run-sanity.sh` defines the test sections. Run a subset with `SANITY_ONLY`, for example `SANITY_ONLY=dist,pyghidra make test`.
 
@@ -88,6 +90,12 @@ with MpqArchive("/games/d2/d2data.mpq") as mpq:
 
 Storm.dll FLIRT signatures are not included: none are public, and Storm.dll is Blizzard's code.
 
+## PlayStation
+
+Open PS2 ELFs with Ghidra's ELF loader. The Emotion Engine extension supplies the R5900 language and analyzers; its PCSX2 save-state importer is in the Script Manager. STABS analysis needs `stdump` from [ccc](https://github.com/chaoticgd/ccc); upstream release builds include it, but this source build does not, so the analyzer prompts for its location.
+
+Open PS4 ELFs with the **PlayStation 4 ELF** format. The loader expects a decrypted ELF without Sony's encryption header and labels NID imports from its bundled `ps4database.xml`.
+
 ## Layout
 
 ```text
@@ -107,6 +115,8 @@ ghidra-bundle/
 ├── ret-sync/             # Submodule: ret-sync (Ghidra extension in ext_ghidra/)
 ├── GhidraFindcrypt/      # Submodule: GhidraFindcrypt
 ├── binexport/            # Submodule: BinExport (Ghidra extension in java/)
+├── ghidra-emotionengine-reloaded/ # Submodule: PlayStation 2 support (tag v2.1.39)
+├── GhidraPS4Loader/      # Submodule: PlayStation 4 ELF loader (fork, branch ghidra-12.2)
 ├── D2GridraTools/        # Submodule: Diablo 2 scripts (unlicensed; fetched only)
 ├── .venv/                # Python venv with bridge-mcp-ghidra (git-ignored)
 ├── .rea/                 # REA's version pin and lockfile; node_modules/ and the rea wrapper are git-ignored
@@ -116,13 +126,14 @@ ghidra-bundle/
     └── ghidra_12.2_PUBLIC/
         ├── ghidraRun, support/pyghidraRun
         ├── Ghidra/Extensions/   # GhidraMCP/, lx-loader/, dos-toolbox/, GhidrAssist/, plugin-ghidra/,
-        │                        # retsync/, GhidraFindcrypt/, BinExport/, Jython/, D2GridraTools/
+        │                        # retsync/, GhidraFindcrypt/, BinExport/,
+        │                        # ghidra-emotionengine-reloaded/, GhidraPS4Loader/, Jython/, D2GridraTools/
         └── portable/            # settings/ (incl. PyGhidra's venv), cache/, temp/
 ```
 
 ## Notes
 
 - **Changing the Ghidra version:** check out the new tag in the `ghidra` submodule and update `GHIDRA_VERSION` in the `Makefile`. Stage 02 refuses to build if they disagree. Upgrades do not migrate projects or settings; remove superseded installations explicitly when no longer needed.
-- **Ghidra 12.2 compatibility patches:** six extensions need small API patches. `scripts/prepare-extension-source.py` applies them to disposable copies under `dist/build/`; submodule checkouts stay unchanged. ret-sync and BinExport build directly.
-- **Directory names matter:** keep extension names from their zips and the `GhidrAssist`, `plugin-ghidra`, and `GhidraFindcrypt` submodule paths. Ghidra requires each jar name to start with its extension directory name; `make verify-extensions` checks class loading.
+- **Ghidra 12.2 compatibility patches:** six extensions need small API patches. `scripts/prepare-extension-source.py` applies them to disposable copies under `dist/build/`; submodule checkouts stay unchanged. ret-sync, BinExport, Ghidra Emotion Engine: Reloaded and the GhidraPS4Loader fork build directly.
+- **Directory names matter:** keep extension names from their zips and the `GhidrAssist`, `plugin-ghidra`, `GhidraFindcrypt`, `ghidra-emotionengine-reloaded`, and `GhidraPS4Loader` submodule paths. Ghidra requires each jar name to start with its extension directory name; `make verify-extensions` checks class loading.
 - **Rebuilding:** stages skip existing outputs; extensions rebuild when their submodule commit or compatibility patch changes, or when their zip is missing. Run `make clean`, or delete one extension under `dist/.../Ghidra/Extensions/`, to rebuild.
