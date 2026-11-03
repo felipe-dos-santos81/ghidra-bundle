@@ -12,6 +12,7 @@ SHELL := /bin/bash
 GHIDRA_VERSION := 12.2
 JAVA_MAJOR := 25
 MCP_PORT := 8089
+REVA_PORT := 8080
 
 BUNDLE_DIR := $(CURDIR)
 DIST_DIR := $(BUNDLE_DIR)/dist
@@ -399,7 +400,9 @@ define REGISTER_OPENCODE
 import json, os, sys
 path = "$(OPENCODE_CONFIG)"
 name = os.environ["MCP_NAME"]
-entry = {"type": "local", "command": json.loads(os.environ["MCP_COMMAND"]), "enabled": True}
+url = os.environ.get("MCP_URL")
+entry = ({"type": "remote", "url": url, "enabled": True} if url
+         else {"type": "local", "command": json.loads(os.environ["MCP_COMMAND"]), "enabled": True})
 try:
     with open(path, encoding="utf-8") as f:
         text = f.read()
@@ -437,8 +440,23 @@ define register_mcp
 	fi
 endef
 
-16-register-mcp: 15-venv ## Register the "ghidra" MCP server with opencode and Claude Code
+# $(call register_mcp_http,name,url): register a streamable-HTTP MCP server with opencode and Claude Code.
+define register_mcp_http
+	mkdir -p "$(dir $(OPENCODE_CONFIG))"; \
+	MCP_NAME=$(1) MCP_URL='$(2)' python3 -c "$$REGISTER_OPENCODE" || exit 1; \
+	if ! command -v claude >/dev/null 2>&1; then \
+		$(WARN) "claude CLI not found, skipping Claude Code registration."; \
+	elif claude mcp get $(1) 2>/dev/null | grep -qF "$(2)"; then \
+		echo "Claude Code: $(1) MCP server already registered"; \
+	else \
+		claude mcp remove $(1) --scope user >/dev/null 2>&1; \
+		claude mcp add --scope user --transport http $(1) "$(2)" || exit 1; \
+	fi
+endef
+
+16-register-mcp: 15-venv ## Register the "ghidra" and "reva" MCP servers with opencode and Claude Code
 	@$(call register_mcp,ghidra,$(BRIDGE_BIN))
+	@$(call register_mcp_http,reva,http://127.0.0.1:$(REVA_PORT)/mcp/message)
 
 venv: 15-venv
 register-mcp: 16-register-mcp
@@ -493,23 +511,31 @@ test: ## Run all sanity checks
 check-jdk-gui:
 	@$(check_jdk_gui)
 
-run: ## Launch Ghidra (fails if port 8089 is already in use)
+run: ## Launch Ghidra with script execution enabled for GhidraMCP (fails if port 8089 is in use)
 	@[ -x "$(INSTALL_DIR)/ghidraRun" ] || { $(ERR) "Ghidra not installed; run 'make install'"; exit 1; }
 	@$(check_jdk_gui)
 	@if { command -v lsof >/dev/null && lsof -i :$(MCP_PORT); } || \
 		{ command -v ss >/dev/null && ss -ltnp 2>/dev/null | grep ':$(MCP_PORT) '; }; then \
 		$(ERR) "port $(MCP_PORT) is already in use (see above)"; exit 1; \
 	fi
-	"$(INSTALL_DIR)/ghidraRun"
+	@if { command -v lsof >/dev/null && lsof -i :$(REVA_PORT); } || \
+		{ command -v ss >/dev/null && ss -ltnp 2>/dev/null | grep ':$(REVA_PORT) '; }; then \
+		$(WARN) "port $(REVA_PORT) is already in use; ReVa will not be able to listen (see above)"; \
+	fi
+	GHIDRA_MCP_ALLOW_SCRIPTS=1 "$(INSTALL_DIR)/ghidraRun"
 
 run-bridge: ## Run bridge-mcp-ghidra over stdio
 	@[ -x "$(BRIDGE_BIN)" ] || { $(ERR) "$(BRIDGE_BIN) not found; run 'make venv'"; exit 1; }
 	@"$(BRIDGE_BIN)"
 
-verify: ## Check that the GhidraMCP plugin answers on port 8089
+verify: ## Check that GhidraMCP answers on port 8089 (and ReVa on 8080, warning only)
 	@curl -sf http://127.0.0.1:$(MCP_PORT)/check_connection && echo || \
 		{ $(ERR) "no GhidraMCP on port $(MCP_PORT): run Ghidra and open a program in the CodeBrowser"; exit 1; }
 	@$(OK) "GhidraMCP is answering on port $(MCP_PORT)."
+	@curl -sf -m 10 -o /dev/null -X POST -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+		-d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"make-verify","version":"0"}}}' \
+		http://127.0.0.1:$(REVA_PORT)/mcp/message && $(OK) "ReVa is answering on port $(REVA_PORT)." || \
+		$(WARN) "no ReVa on port $(REVA_PORT): enable the ReVa plugins in Ghidra (see README)"
 
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 
