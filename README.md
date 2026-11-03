@@ -44,9 +44,11 @@ A successful `make install` registers `bridge-mcp-ghidra` as the `ghidra` MCP se
 
 ReVa runs inside Ghidra and listens on `127.0.0.1:8080` (`/mcp/message`, streamable HTTP) once its plugins are enabled. Enable them once: in the project window, File → Configure → the plug icon ("Configure all plugins") → check **ReVa Application Plugin**; in the CodeBrowser, the same path → check **ReVa Plugin**, then File → Save Tool. `make verify` warns until ReVa answers, and `claude mcp get reva` shows the connection. The port and an optional API key live in Ghidra's tool options (Edit → Tool Options → ReVa Server Options); the bundle registers the default port, so change both together. ReVa's own script tools run Python scripts only, and only when Ghidra was started through `pyghidraRun`; use the `ghidra` server to run Java scripts.
 
+ReVa's server answers any origin (`Access-Control-Allow-Origin: *`) and checks neither the `Origin` nor the `Host` header, unlike GhidraMCP, so while it is listening a web page could reach it through DNS rebinding and use tools such as import-file, read-memory and write-script. Turn on its API key in the ReVa Server Options when that matters; a client then needs the key as an `X-API-Key` header (Claude Code: `claude mcp add --transport http --header "X-API-Key: <key>" reva http://127.0.0.1:8080/mcp/message`), which the bundle's registration does not add.
+
 ### Script execution
 
-`make run` starts Ghidra with `GHIDRA_MCP_ALLOW_SCRIPTS=1`, so GhidraMCP's `run_ghidra_script` and `run_script_inline` tools run arbitrary Ghidra scripts for any client that can reach `127.0.0.1:8089`. That is code execution as your user: the port stays bound to localhost, but every local process can use it. To keep scripts off, start `dist/ghidra_12.2_PUBLIC/ghidraRun` directly instead of `make run`.
+`make run` starts Ghidra with `GHIDRA_MCP_ALLOW_SCRIPTS=1`, so GhidraMCP's `run_ghidra_script` and `run_script_inline` tools run arbitrary Ghidra scripts for any client that can reach `127.0.0.1:8089`. That is code execution as your user: the port stays bound to localhost, but every local process can use it. To keep scripts off, start `dist/ghidra_12.2_PUBLIC/ghidraRun` directly instead of `make run`. GhidraMCP runs scripts on Ghidra's UI thread, so the GUI is unresponsive for the length of an agent's script call (for LLM4Decompile, up to the model's answer), and it copies the script into `~/ghidra_scripts/` for the run.
 
 ### REA
 

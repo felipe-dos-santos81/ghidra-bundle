@@ -112,8 +112,10 @@ Pre-seeding tool configuration is left out: Ghidra's default tool files are
 Ghidra's, and GhidraMCP has the same one-time step today.
 
 ReVa's scripting tools expose PyGhidra scripting on the MCP port. The default
-binding is localhost without an API key, which matches GhidraMCP's posture. The
-README notes the setting to turn on an API key if the port is ever exposed.
+binding is localhost without an API key. Correction (review): this is weaker
+than GhidraMCP's posture, which rejects cross-origin and non-loopback `Host`
+requests; ReVa allows any origin and checks neither header, so the README
+recommends its API key and shows the header a client then needs.
 
 ### 3.4 Sanity section `reva`
 
