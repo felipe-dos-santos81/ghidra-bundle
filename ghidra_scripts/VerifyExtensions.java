@@ -31,6 +31,7 @@ public class VerifyExtensions extends GhidraScript {
 		check("Jython", GhidraScriptProvider.class, "JythonScriptProvider");
 		check("GhidrAssist", Plugin.class, "GhidrAssistPlugin");
 		check("plugin-ghidra", Plugin.class, "ReaiAPIServicePlugin");
+		check("reverse-engineering-assistant", Plugin.class, "RevaPlugin");
 	}
 
 	private void check(String extension, Class<? extends ExtensionPoint> kind, String className) {

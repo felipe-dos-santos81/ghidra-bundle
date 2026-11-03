@@ -367,6 +367,7 @@ PACKAGE_PATTERNS=(
   "ghidra_{v}_*_BinExport.zip"
   "ghidra_{v}_*_GhidrAssist.zip"
   "ghidra_{v}_*_plugin-ghidra.zip"
+  "ghidra_{v}_*_reverse-engineering-assistant.zip"
 )
 # Build folders that must hold no current zip once install has moved them. The six
 # API-patched extensions build in disposable copies under dist/build/ (Makefile
@@ -375,7 +376,7 @@ PACKAGE_PATTERNS=(
 # the unpatched ret-sync and BinExport trees.
 BUILD_OUTPUTS=(ghidra/build/dist ghidra-mcp/build/distributions lx-loader/dist dos-toolbox/dist
                ret-sync/ext_ghidra/dist GhidraFindcrypt/dist binexport/java/dist
-               GhidrAssist/dist plugin-ghidra/dist
+               GhidrAssist/dist plugin-ghidra/dist reverse-engineering-assistant/dist
                dist/build/ghidra-mcp/build/distributions
                dist/build/lx-loader/dist dist/build/dos-toolbox/dist
                dist/build/GhidrAssist/dist dist/build/plugin-ghidra/dist
