@@ -64,8 +64,15 @@ def jar_of(class_name):
 launcher = RevaHeadlessLauncher(None, True)  # in-memory config, random free port
 launcher.start()
 try:
-    origins = (f"mcp-sdk {jar_of('io.modelcontextprotocol.spec.McpSchema')} "
-               f"jackson {jar_of('com.fasterxml.jackson.databind.ObjectMapper')}")
+    # The bundle shades these into ReVa's jar under reva.shaded; report that copy when it
+    # exists, else whichever extension's unshaded copy Ghidra loaded first.
+    def origin(name):
+        try:
+            return jar_of("reva.shaded." + name)
+        except Exception:
+            return jar_of(name)
+    origins = (f"mcp-sdk {origin('io.modelcontextprotocol.spec.McpSchema')} "
+               f"jackson {origin('com.fasterxml.jackson.databind.ObjectMapper')}")
     if not launcher.waitForServer(60000):
         print(f"REVA FAIL server did not start within 60 s ({origins})")
     else:

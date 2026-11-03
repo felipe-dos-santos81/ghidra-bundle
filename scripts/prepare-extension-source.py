@@ -7,6 +7,68 @@ GHIDRA_VERSION = "12.2"
 LX_WRITE_SIGNATURE = (
     "\tpublic void write(RandomAccessFile raf, DataConverter dc) throws IOException {"
 )
+REVA_PLUGINS_ANCHOR = (
+    '//----------------------START "DO NOT MODIFY" SECTION------------------------------\n'
+    "def ghidraInstallDir\n"
+)
+REVA_TAIL_ANCHOR = (
+    "// Exclude additional files from the built extension\n"
+    "// Ex: buildExtension.exclude '.idea/**'\n"
+)
+# GhidrAssist ships older copies of the MCP SDK, Jackson, json-schema-validator and
+# snakeyaml. Ghidra loads every extension's lib/*.jar on one class path ordered by
+# extension name, so ReVa would get GhidrAssist's copies and its tool calls would hang.
+# The block relocates those packages into reverse-engineering-assistant.jar and leaves
+# their jars out of lib/ (zip excludes match each copy spec's own relative path: the thin
+# jar is a root-level file, the dependency jars sit under lib/). reactor, reactive-streams
+# and slf4j stay as plain jars: same
+# versions as GhidrAssist's, and Jetty needs slf4j unrelocated.
+REVA_SHADE_BLOCK = """
+// --- ghidra-bundle: shade the MCP SDK and Jackson into the extension jar ---------------
+// Ghidra puts every extension's lib/*.jar on one class path ordered by extension name;
+// GhidrAssist's older MCP SDK and Jackson would otherwise be loaded ahead of ReVa's.
+configurations {
+	shade
+}
+dependencies {
+	shade platform("io.modelcontextprotocol.sdk:mcp-bom:2.1.0")
+	shade("io.modelcontextprotocol.sdk:mcp-core") {
+		exclude group: 'io.projectreactor'
+		exclude group: 'org.reactivestreams'
+		exclude group: 'org.slf4j'
+	}
+	shade("io.modelcontextprotocol.sdk:mcp-json-jackson2") {
+		exclude group: 'org.slf4j'
+	}
+	shade "com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.22.4"
+}
+jar {
+	archiveClassifier = 'thin'
+}
+tasks.named('shadowJar', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+	configurations = project.configurations.named('shade').map { [it] }
+	archiveBaseName = project.name
+	archiveClassifier = ''
+	archiveVersion = ''
+	mergeServiceFiles()
+	manifest {
+		attributes 'Multi-Release': 'true'
+	}
+	relocate 'io.modelcontextprotocol', 'reva.shaded.io.modelcontextprotocol'
+	relocate 'com.fasterxml.jackson', 'reva.shaded.com.fasterxml.jackson'
+	relocate 'com.networknt', 'reva.shaded.com.networknt'
+	relocate 'org.yaml.snakeyaml', 'reva.shaded.org.yaml.snakeyaml'
+	relocate 'com.ethlo', 'reva.shaded.com.ethlo'
+}
+buildExtension {
+	dependsOn shadowJar
+	from(shadowJar) {
+		into "${project.name}/lib"
+	}
+	exclude '*-thin.jar', '**/lib/mcp-*.jar', '**/lib/jackson-*.jar',
+		'**/lib/json-schema-validator-*.jar', '**/lib/snakeyaml-*.jar', '**/lib/itu-*.jar'
+}
+"""
 REVENG_ACCESSORS = (
     "    public void setBrowserServiceProvider(ServiceProvider browserServiceProvider) {\n"
     "        this.browserServiceProvider = browserServiceProvider;\n"
@@ -96,6 +158,19 @@ EXTENSIONS = {
                     "monitor.checkCancelled();",
                     2,
                 ),
+            ),
+        ),
+    ),
+    "reverse-engineering-assistant": (
+        (
+            Path("build.gradle"),
+            (
+                (
+                    REVA_PLUGINS_ANCHOR,
+                    "plugins {\n\tid 'com.gradleup.shadow' version '9.6.1'\n}\n\n" + REVA_PLUGINS_ANCHOR,
+                    1,
+                ),
+                (REVA_TAIL_ANCHOR, REVA_TAIL_ANCHOR + REVA_SHADE_BLOCK, 1),
             ),
         ),
     ),

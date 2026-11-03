@@ -63,8 +63,8 @@ The other five repos in the post are out (section 1.2).
 | :--- | :--- |
 | ReVa source | Shallow submodule of upstream `main`, pinned to a commit at or after `4d2fc5b` (2026-11-03). Upstream CI tests Ghidra 12.2 but the latest release (v7.3.1) only ships 12.1.3 zips, so there is no tag to pin. No fork: it needs no patches. |
 | ReVa submodule path | `reverse-engineering-assistant`, because the project has no `settings.gradle` and Gradle names the zip, directory and jar after the checkout directory (same rule as GhidrAssist). Release assets confirm the name: `ghidra_12.1.3_PUBLIC_<date>_reverse-engineering-assistant.zip`. |
-| ReVa 12.2 source patches | None. Its commit "Update ReVa for Ghidra 12.2" and CI matrix cover 12.2, so it builds directly like ret-sync and BinExport, with no `prepare-extension-source.py` entry. |
-| Library collision | ReVa ships MCP SDK 2.1.0 and Jackson 2.22; GhidrAssist already ships MCP SDK 0.17.1 and Jackson 2.19, and Ghidra loads every `<ext>/lib/*.jar` on one flat class loader. Coexistence is verified, not assumed: the `reva` sanity check starts ReVa on the real installed Ghidra class path (section 3.4), and `check_portable_paths`-style probes already load GhidrAssist. A conflict found during implementation is a stop that comes back to the user (shading or a source patch would be new scope), not a guess. |
+| ReVa 12.2 source patches | None for the API. Amendment: it builds from a patched copy under `dist/build/` after all, because of the build patch above (stage 13 mirrors stages 04–08 and 10). |
+| Library collision | ReVa ships MCP SDK 2.1.0 and Jackson 2.22; GhidrAssist already ships MCP SDK 0.17.1 and Jackson 2.19, and Ghidra loads every `<ext>/lib/*.jar` on one flat class loader. Coexistence is verified, not assumed: the `reva` sanity check starts ReVa on the real installed Ghidra class path (section 3.4). Amendment (implementation): the conflict was real (ReVa answered `initialize` but every tool call hung while GhidrAssist was installed; with GhidrAssist aside, tools/list answered in 0.1 s). The user chose shading: a build patch through `prepare-extension-source.py` adds the Shadow plugin to ReVa's `build.gradle` and relocates the MCP SDK, Jackson, json-schema-validator, snakeyaml and itu into `reverse-engineering-assistant.jar`, dropping those jars from `lib/`. |
 | ReVa port | Keep its default, 127.0.0.1:8080, as `REVA_PORT` in the Makefile. The port is a Ghidra tool option, so the Makefile cannot set it; `REVA_PORT` only names what the bundle registers and checks. `make run` keeps failing for a busy 8089 and only warns for a busy 8080 (ReVa listens only once enabled, and 8080 is a common dev port). `make verify` fails without GhidraMCP and warns without ReVa. Amendment: `make test` uses ReVa's random-port mode, not 18080. |
 | MCP server name | `reva`, lowercase like `ghidra` and `rea`. |
 | Registration | A new `register_mcp_http,name,url` macro beside `register_mcp`. Claude Code: `claude mcp add --scope user --transport http reva http://127.0.0.1:8080/mcp/message`. opencode: `{"type": "remote", "url": ...}` through the same atomic JSON writer. |
@@ -138,7 +138,9 @@ A new section in `tests/run-sanity.sh`, between `mcp` and `dist`:
 Amendment (implementation): the probe (`tests/probes/reva_probe.py`) starts the
 launcher in random-port mode and reads `getPort()`, so there is no
 `TEST_REVA_PORT` and nothing can collide. It runs under `pyghidraRun -H` with a
-throwaway project, like the PyGhidra MPQ probe.
+throwaway project, like the PyGhidra MPQ probe. After review it also calls
+`tools/list` with a 20-second timeout (the call that hung before shading) and
+reports the jars the MCP SDK and Jackson classes were loaded from.
 
 ## 4. LLM4Decompile
 

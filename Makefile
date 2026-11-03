@@ -37,6 +37,8 @@ REVENG_BUILD_DIR := $(DIST_DIR)/build/plugin-ghidra
 REVENG_PATCH_ID = plugin-ghidra-$(EXT_PATCH_HASH)
 FINDCRYPT_BUILD_DIR := $(DIST_DIR)/build/GhidraFindcrypt
 FINDCRYPT_PATCH_ID = ghidrafindcrypt-$(EXT_PATCH_HASH)
+REVA_BUILD_DIR := $(DIST_DIR)/build/reverse-engineering-assistant
+REVA_PATCH_ID = reverse-engineering-assistant-$(EXT_PATCH_HASH)
 VENV_DIR := $(BUNDLE_DIR)/.venv
 BRIDGE_BIN := $(VENV_DIR)/bin/bridge-mcp-ghidra
 OPENCODE_CONFIG := $(HOME)/.config/opencode/opencode.json
@@ -335,8 +337,10 @@ endef
 	fi
 	@scripts/install-d2gridratools.sh D2GridraTools "$(EXT_DIR)" "$(GHIDRA_VERSION)"
 
-13-install-reva: 03-install-ghidra ## Build and install ReVa (MCP server on port 8080)
-	$(call install_extension,reverse-engineering-assistant,reverse-engineering-assistant,reverse-engineering-assistant/dist/ghidra_$(GHIDRA_VERSION)_*_reverse-engineering-assistant.zip,,,reverse-engineering-assistant)
+13-install-reva: 03-install-ghidra ## Build and install ReVa (MCP server on port 8080; MCP SDK and Jackson shaded)
+	@python3 -I $(EXT_PATCH_SCRIPT) reverse-engineering-assistant \
+		reverse-engineering-assistant "$(REVA_BUILD_DIR)" "$(GHIDRA_VERSION)" || exit 1;
+	$(call install_extension,reverse-engineering-assistant,$(REVA_BUILD_DIR),$(REVA_BUILD_DIR)/dist/ghidra_$(GHIDRA_VERSION)_*_reverse-engineering-assistant.zip,,,reverse-engineering-assistant,$(REVA_PATCH_ID))
 
 verify-extensions: ## Check headlessly that Ghidra loads every extension's classes
 	@[ -x "$(INSTALL_DIR)/support/analyzeHeadless" ] || { $(ERR) "Ghidra not installed; run 'make install'"; exit 1; }

@@ -395,7 +395,7 @@ BUILD_OUTPUTS=(ghidra/build/dist ghidra-mcp/build/distributions lx-loader/dist d
                dist/build/ghidra-mcp/build/distributions
                dist/build/lx-loader/dist dist/build/dos-toolbox/dist
                dist/build/GhidrAssist/dist dist/build/plugin-ghidra/dist
-               dist/build/GhidraFindcrypt/dist)
+               dist/build/GhidraFindcrypt/dist dist/build/reverse-engineering-assistant/dist)
 
 check_runtime() {
   local expected actual

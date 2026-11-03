@@ -565,3 +565,18 @@ Set `Status: approved 2026-11-03; implemented` and add to section 3.4: "Amendmen
 git add docs/superpowers/specs/2026-11-03-reva-llm4decompile-design.md docs/superpowers/plans/2026-11-03-reva-llm4decompile.md
 git commit -m "docs: mark the ReVa and LLM4Decompile design implemented"
 ```
+
+---
+
+### Task 10: Shade ReVa's conflicting dependencies (added after the final review)
+
+The review's deeper ReVa probe showed the jar clash is real: with GhidrAssist installed, ReVa answers `initialize` but `tools/list` and `ping` never return, because Ghidra loads GhidrAssist's MCP SDK 0.17.1 and Jackson 2.19.2 ahead of ReVa's 2.1.0 and 2.22.4. The user chose shading.
+
+**Files:**
+- Modify: `scripts/prepare-extension-source.py` (new `reverse-engineering-assistant` entry patching `build.gradle`), `tests/test_prepare_extension_source.py` (`PrepareRevaTest`), `Makefile` (`REVA_BUILD_DIR`, `REVA_PATCH_ID`, stage 13 builds the patched copy), `tests/run-sanity.sh` (`BUILD_OUTPUTS`), `tests/probes/reva_probe.py` (reports the `reva.shaded` origin), docs.
+
+- [ ] **Step 1: RED** — `PrepareRevaTest` (synthetic `build.gradle` with the two anchors; patched output has the `plugins { id 'com.gradleup.shadow' version '9.6.1' }` block before the "DO NOT MODIFY" anchor and the shade block after the tail anchor; idempotent; missing/duplicated/partial anchors rejected; real pinned `build.gradle` patches read-only). Run: `python3 -I tests/test_prepare_extension_source.py` → 4 errors (unsupported extension).
+- [ ] **Step 2: GREEN** — the entry: a `shade` configuration (mcp-bom platform, mcp-core and mcp-json-jackson2 excluding reactor, reactive-streams and slf4j, plus jackson-dataformat-yaml), `jar { archiveClassifier = 'thin' }`, `shadowJar` over that configuration with `mergeServiceFiles()`, `Multi-Release: true`, relocations of `io.modelcontextprotocol`, `com.fasterxml.jackson`, `com.networknt`, `org.yaml.snakeyaml`, `com.ethlo` to `reva.shaded.*`, and `buildExtension` adding the shadow jar to `lib/` while excluding `*-thin.jar` and the shaded dependency jars (zip excludes match each copy spec's own relative path). Unit tests → OK.
+- [ ] **Step 3: Build** — `make 13-install-reva` rebuilds from `dist/build/reverse-engineering-assistant/`; `lib/` holds the shaded jar, Jetty, servlet, reactor, reactive-streams, slf4j and the source zip only; `make verify-extensions` → OK.
+- [ ] **Step 4: Verify** — `SANITY_ONLY=reva make test` → `REVA OK port <n> tools 86 mcp-sdk reverse-engineering-assistant.jar jackson reverse-engineering-assistant.jar`; full `make test` green.
+- [ ] **Step 5: Docs and commit** — AGENTS.md 2.3, 2.9, 2.10; README notes and table; spec amendments.

@@ -6,7 +6,7 @@ A reproducible, self-contained **Ghidra 12.2**, built from source with nine exte
 | :--- | :--- |
 | [Ghidra](https://github.com/NationalSecurityAgency/ghidra) 12.2 | Built from the `Ghidra_12.2_build` tag |
 | [GhidraMCP](https://github.com/bethington/ghidra-mcp) | Plugin serving Ghidra's analysis over HTTP on port 8089, plus the `bridge-mcp-ghidra` MCP server |
-| [ReVa](https://github.com/cyberkaida/reverse-engineering-assistant) | MCP server inside Ghidra on 127.0.0.1:8080 (streamable HTTP) with small, context-sparing tools for AI assistants |
+| [ReVa](https://github.com/cyberkaida/reverse-engineering-assistant) | MCP server inside Ghidra on 127.0.0.1:8080 (streamable HTTP) with small, context-sparing tools for AI assistants; built with its MCP SDK and Jackson shaded so it coexists with GhidrAssist |
 | [lx-loader](https://github.com/yetmorecode/ghidra-lx-loader) | Loader for Linear Executables (LE/LX: DOS/4GW, OS/2, VxD); built from [a fork](https://github.com/felipe-dos-santos81/ghidra-lx-loader/tree/fix-object-permissions) with an object-permissions fix |
 | [GhidraDosToolbox](https://github.com/plaes/GhidraDosToolbox) | MS-DOS loader and analyzers (segmentation, Borland Pascal overlays, interrupt calls) |
 | [GhidrAssist](https://github.com/symgraph/GhidrAssist) | LLM assistant; built from [a fork](https://github.com/felipe-dos-santos81/GhidrAssist/tree/portable-settings) that keeps its data in `portable/` |
@@ -150,6 +150,6 @@ ghidra-bundle/
 ## Notes
 
 - **Changing the Ghidra version:** check out the new tag in the `ghidra` submodule and update `GHIDRA_VERSION` in the `Makefile`. Stage 02 refuses to build if they disagree. Upgrades do not migrate projects or settings; remove superseded installations explicitly when no longer needed.
-- **Ghidra 12.2 compatibility patches:** six extensions need small API patches. `scripts/prepare-extension-source.py` applies them to disposable copies under `dist/build/`; submodule checkouts stay unchanged. ret-sync and BinExport build directly.
+- **Ghidra 12.2 compatibility patches:** six extensions need small API patches, and ReVa needs a build patch that shades its MCP SDK and Jackson into its own jar (GhidrAssist ships older copies, and Ghidra loads every extension's jars on one class path). `scripts/prepare-extension-source.py` applies them to disposable copies under `dist/build/`; submodule checkouts stay unchanged. ret-sync and BinExport build directly.
 - **Directory names matter:** keep extension names from their zips and the `GhidrAssist`, `plugin-ghidra`, `GhidraFindcrypt` and `reverse-engineering-assistant` submodule paths. Ghidra requires each jar name to start with its extension directory name; `make verify-extensions` checks class loading.
 - **Rebuilding:** stages skip existing outputs; extensions rebuild when their submodule commit or compatibility patch changes, or when their zip is missing. Run `make clean`, or delete one extension under `dist/.../Ghidra/Extensions/`, to rebuild. The LLM4Decompile extension is reassembled when its script, installer, model or URL changes; the model itself stays in Ollama's store across `make clean`.
