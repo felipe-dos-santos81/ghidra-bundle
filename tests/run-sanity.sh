@@ -7,7 +7,7 @@
 #        TEST_MCP_PORT=18089  port for the GhidraMCP test server (default 18089)
 #        TEST_IMPORT_TIMEOUT=600  seconds before a fixture import is killed (default 600)
 #        SANITY_ONLY=dist,jython  run only these sections: env, extensions, fixtures,
-#                                 mcp, dist, binexport, portable, jython, pyghidra, rea
+#                                 mcp, dist, binexport, portable, jython, pyghidra, reva, rea
 #        PACKAGES_DIR=<dir>       built zips to check (default: <install dir>/../packages)
 #        REA_BIN=<file>           REA wrapper written by `make install-rea` (default: <repo>/.rea/rea)
 # Needs GNU timeout (Linux: coreutils; macOS: `brew install coreutils` for gtimeout).
@@ -33,7 +33,7 @@ indent() { sed 's/^/    /'; }
 fail_with_log() { fail "$1"; tail -20 "$2" | indent; }  # fail_with_log <message> <log file>
 
 # want <section>: true when SANITY_ONLY is unset or lists <section> (comma-separated).
-SECTIONS=",env,extensions,fixtures,mcp,dist,binexport,portable,jython,pyghidra,rea,"
+SECTIONS=",env,extensions,fixtures,mcp,dist,binexport,portable,jython,pyghidra,reva,rea,"
 want() { [[ -z "${SANITY_ONLY:-}" || ",$SANITY_ONLY," == *",$1,"* ]]; }
 SANITY_ONLY=${SANITY_ONLY:-}
 for section in ${SANITY_ONLY//,/ }; do
@@ -571,7 +571,32 @@ check_pyghidra() {
 
 if want pyghidra; then check_pyghidra; fi
 
-# ── 3h. REA ───────────────────────────────────────────────────────────────────
+# ── 3h. ReVa ──────────────────────────────────────────────────────────────────
+# Runs ReVa's headless launcher inside pyghidraRun, which loads every installed
+# extension like the GUI does, so a jar clash with another extension fails here.
+check_reva() {
+  local log="$WORK/reva.log" ext="$INSTALL_DIR/Ghidra/Extensions/reverse-engineering-assistant" path status=0
+  if [[ ! -f "$ext/lib/reverse-engineering-assistant.jar" ]]; then
+    fail "ReVa: $ext/lib/reverse-engineering-assistant.jar is missing (run 'make install-reva')"
+    return
+  fi
+  path=$PATH
+  if [[ -n "${VIRTUAL_ENV:-}" ]]; then path=${path//"$VIRTUAL_ENV/bin:"/}; fi
+  (cd "$WORK" && env -u VIRTUAL_ENV PATH="$path" "$TIMEOUT" --foreground "${TEST_IMPORT_TIMEOUT:-600}" \
+    "$INSTALL_DIR/support/pyghidraRun" -H "$WORK/proj" "reva-$RANDOM" \
+    -import "$WORK/probe.bin" -loader BinaryLoader -processor x86:LE:32:default -noanalysis \
+    -deleteProject -scriptPath "$TESTS/probes" -preScript reva_probe.py < /dev/null > "$log" 2>&1) || status=$?
+  ((status == 0)) || echo "pyghidraRun exit status $status" >> "$log"
+  if grep -q 'REVA OK' "$log"; then
+    pass "ReVa: headless MCP server answers initialize ($(grep -o 'REVA OK port [0-9]*' "$log" | head -n 1))"
+  else
+    fail_with_log "ReVa: headless MCP server did not answer initialize" "$log"
+  fi
+}
+
+if want reva; then check_reva; fi
+
+# ── 3i. REA ───────────────────────────────────────────────────────────────────
 check_rea_patch() {
   local log="$WORK/rea-policy-tests.log"
   if python3 -I "$TESTS/test_patch_rea_ghidra.py" > "$log" 2>&1; then
