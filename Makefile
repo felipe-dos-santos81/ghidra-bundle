@@ -13,6 +13,8 @@ GHIDRA_VERSION := 12.2
 JAVA_MAJOR := 25
 MCP_PORT := 8089
 REVA_PORT := 8080
+LLM4DECOMPILE_MODEL := hf.co/mradermacher/llm4decompile-9b-v2-GGUF:Q8_0
+OLLAMA_URL := http://127.0.0.1:11434
 
 BUNDLE_DIR := $(CURDIR)
 DIST_DIR := $(BUNDLE_DIR)/dist
@@ -110,6 +112,7 @@ GHIDRA_ZIP = ghidra_$(1)_*_[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].zip
 	10-install-findcrypt install-findcrypt 11-install-binexport install-binexport \
 	12-install-scripts install-scripts 13-install-reva install-reva verify-extensions \
 	14-pyghidra pyghidra 15-venv venv 16-register-mcp register-mcp 17-install-rea install-rea \
+	18-install-llm4decompile install-llm4decompile \
 	test install check-jdk-gui run run-bridge verify clean distclean
 
 help: ## Show this help
@@ -157,7 +160,7 @@ help: ## Show this help
 check_tool = command -v $(1) >/dev/null 2>&1 || { $(ERR) "$(2) not found on PATH (run 'make deps')"; exit 1; }; \
 	$(TICK) "$(2)" "$$($(3) 2>&1 | head -n 1)"
 
-00-env: ## Check host prerequisites (StormLib and Node.js optional)
+00-env: ## Check host prerequisites (StormLib, Node.js and Ollama optional)
 	@$(call jdk_usable,$(JAVA25_HOME)) || \
 		{ $(ERR) "JAVA25_HOME is not a usable JDK $(JAVA_MAJOR) (needs executable bin/java and bin/javac reporting major $(JAVA_MAJOR)): '$(JAVA25_HOME)' (run 'make deps')"; exit 1; }
 	@$(TICK) "JDK 25" "$(JAVA25_HOME)"
@@ -179,6 +182,11 @@ check_tool = command -v $(1) >/dev/null 2>&1 || { $(ERR) "$(2) not found on PATH
 		$(TICK) "Node.js" "$$(node --version) (REA)"; \
 	else \
 		$(WARN) "$(REA_NODE_WANT) not found: optional, needed for REA"; \
+	fi
+	@if command -v ollama >/dev/null 2>&1 && ollama list >/dev/null 2>&1; then \
+		$(TICK) "Ollama" "$$(ollama --version 2>&1 | head -n 1) (LLM4Decompile)"; \
+	else \
+		$(WARN) "Ollama not found or not serving: optional, needed to run the LLM4Decompile model"; \
 	fi
 	@$(OK) "Environment check passed."
 
@@ -492,20 +500,29 @@ register-mcp: 16-register-mcp
 
 install-rea: 17-install-rea
 
+# ── Stage 18: LLM4Decompile ───────────────────────────────────────────────────
+
+18-install-llm4decompile: 03-install-ghidra ## Install the LLM4Decompile refine script and pull its model into Ollama (optional)
+	@scripts/install-llm4decompile.sh ghidra_scripts/LLM4DecompileRefine.java "$(EXT_DIR)" "$(GHIDRA_VERSION)" \
+		"$(LLM4DECOMPILE_MODEL)" "$(OLLAMA_URL)"
+
+install-llm4decompile: 18-install-llm4decompile
+
 # ── Pipeline & runtime ────────────────────────────────────────────────────────
 
 PIPELINE := 00-deps 00-env 01-checkout 02-build-ghidra 03-install-ghidra \
 	04-install-mcp 05-install-lx-loader 06-install-dos-toolbox \
 	07-install-ghidrassist 08-install-reveng 09-install-retsync 10-install-findcrypt \
 	11-install-binexport 12-install-scripts 13-install-reva verify-extensions 14-pyghidra \
-	15-venv 16-register-mcp 17-install-rea test
+	15-venv 16-register-mcp 17-install-rea 18-install-llm4decompile test
 
 install: $(PIPELINE) ## Run the full pipeline (all stages above, in order)
 	@$(OK) "Ghidra Bundle installed. Run 'make run' to launch Ghidra."
 
 test: ## Run all sanity checks
 	@$(call jdk_usable,$(JAVA25_HOME)) || { $(ERR) "JDK 25 not found (run 'make deps')"; exit 1; }
-	@PACKAGES_DIR="$(PACKAGES_DIR)" REA_BIN="$(REA_BIN)" tests/run-sanity.sh "$(INSTALL_DIR)" "$(JAVA25_HOME)"
+	@PACKAGES_DIR="$(PACKAGES_DIR)" REA_BIN="$(REA_BIN)" LLM4DECOMPILE_MODEL="$(LLM4DECOMPILE_MODEL)" \
+		tests/run-sanity.sh "$(INSTALL_DIR)" "$(JAVA25_HOME)"
 
 # Internal target used by `make test` to exercise the GUI-capability check.
 check-jdk-gui:
