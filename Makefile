@@ -107,8 +107,8 @@ GHIDRA_ZIP = ghidra_$(1)_*_[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].zip
 	06-install-dos-toolbox install-dos-toolbox 07-install-ghidrassist install-ghidrassist \
 	08-install-reveng install-reveng 09-install-retsync install-retsync \
 	10-install-findcrypt install-findcrypt 11-install-binexport install-binexport \
-	12-install-scripts install-scripts verify-extensions 13-pyghidra pyghidra \
-	14-venv venv 15-register-mcp register-mcp 16-install-rea install-rea \
+	12-install-scripts install-scripts 13-install-reva install-reva verify-extensions \
+	14-pyghidra pyghidra 15-venv venv 16-register-mcp register-mcp 17-install-rea install-rea \
 	test install check-jdk-gui run run-bridge verify clean distclean
 
 help: ## Show this help
@@ -240,7 +240,7 @@ checkout: 01-checkout
 build-ghidra: 02-build-ghidra
 install-ghidra: 03-install-ghidra
 
-# ── Stages 4–13: Extensions, scripts and PyGhidra ─────────────────────────────
+# ── Stages 4–14: Extensions, scripts and PyGhidra ─────────────────────────────
 
 # $(call install_extension,directory,source dir,zip glob[,legacy directory to remove][,gradle subdir][,commit dir][,patch identity])
 # Builds an extension with ghidra/gradlew (in <source dir>/<gradle subdir>), moves the
@@ -326,6 +326,9 @@ endef
 	fi
 	@scripts/install-d2gridratools.sh D2GridraTools "$(EXT_DIR)" "$(GHIDRA_VERSION)"
 
+13-install-reva: 03-install-ghidra ## Build and install ReVa (MCP server on port 8080)
+	$(call install_extension,reverse-engineering-assistant,reverse-engineering-assistant,reverse-engineering-assistant/dist/ghidra_$(GHIDRA_VERSION)_*_reverse-engineering-assistant.zip,,,reverse-engineering-assistant)
+
 verify-extensions: ## Check headlessly that Ghidra loads every extension's classes
 	@[ -x "$(INSTALL_DIR)/support/analyzeHeadless" ] || { $(ERR) "Ghidra not installed; run 'make install'"; exit 1; }
 	@echo "Checking extension class discovery (headless)..."
@@ -344,7 +347,7 @@ verify-extensions: ## Check headlessly that Ghidra loads every extension's class
 	fi
 	@$(OK) "All extension classes loaded."
 
-13-pyghidra: 03-install-ghidra ## Set up PyGhidra's venv (in portable/) with the bundle_mpq MPQ reader
+14-pyghidra: 03-install-ghidra ## Set up PyGhidra's venv (in portable/) with the bundle_mpq MPQ reader
 	@VENV=$$(python3 -I scripts/pyghidra-venv-dir.py "$(INSTALL_DIR)") || exit 1; \
 	PY="$$VENV/bin/python3"; WHEELS="$(INSTALL_DIR)/Ghidra/Features/PyGhidra/pypkg/dist"; \
 	SRC=$$(git hash-object $(BUNDLE_MPQ_SRC)/pyproject.toml $(BUNDLE_MPQ_SRC)/bundle_mpq/*.py | tr -d '\n'); \
@@ -376,11 +379,12 @@ install-retsync: 09-install-retsync
 install-findcrypt: 10-install-findcrypt
 install-binexport: 11-install-binexport
 install-scripts: 12-install-scripts
-pyghidra: 13-pyghidra
+install-reva: 13-install-reva
+pyghidra: 14-pyghidra
 
-# ── Stages 14–15: MCP bridge ──────────────────────────────────────────────────
+# ── Stages 15–16: MCP bridge ──────────────────────────────────────────────────
 
-14-venv: 01-checkout ## Create .venv and install bridge-mcp-ghidra (editable)
+15-venv: 01-checkout ## Create .venv and install bridge-mcp-ghidra (editable)
 	@if [ -x "$(BRIDGE_BIN)" ]; then \
 		echo "$(VENV_DIR) already set up, skipping."; \
 	else \
@@ -433,19 +437,19 @@ define register_mcp
 	fi
 endef
 
-15-register-mcp: 14-venv ## Register the "ghidra" MCP server with opencode and Claude Code
+16-register-mcp: 15-venv ## Register the "ghidra" MCP server with opencode and Claude Code
 	@$(call register_mcp,ghidra,$(BRIDGE_BIN))
 
-venv: 14-venv
-register-mcp: 15-register-mcp
+venv: 15-venv
+register-mcp: 16-register-mcp
 
-# ── Stage 16: REA ─────────────────────────────────────────────────────────────
+# ── Stage 17: REA ─────────────────────────────────────────────────────────────
 
 # REA runs this Ghidra headlessly through its own bridge. The stage patches the pinned
 # policy for Ghidra 12.2, then writes a wrapper bound to this install and JDK. The wrapper
 # uses node's absolute path and keeps sessions in portable/temp. Unsuitable Node.js or an
 # npm failure skips REA; a policy-patch failure stops the stage.
-16-install-rea: 03-install-ghidra ## Install REA, apply the Ghidra 12.2 patch, and register its MCP server (optional)
+17-install-rea: 03-install-ghidra ## Install REA, apply the Ghidra 12.2 patch, and register its MCP server (optional)
 	@skip() { $(WARN) "$$1: skipping REA (optional)."; \
 		"$(REA_BIN)" --version >/dev/null 2>&1 || rm -f "$(REA_BIN)"; exit 0; }; \
 	{ $(REA_NODE_CHECK); } 2>/dev/null || skip "$(REA_NODE_WANT) not found"; \
@@ -468,15 +472,15 @@ register-mcp: 15-register-mcp
 		&& chmod +x "$(REA_BIN)" || exit 1; \
 	$(call register_mcp,rea,$(REA_BIN),--mcp)
 
-install-rea: 16-install-rea
+install-rea: 17-install-rea
 
 # ── Pipeline & runtime ────────────────────────────────────────────────────────
 
 PIPELINE := 00-deps 00-env 01-checkout 02-build-ghidra 03-install-ghidra \
 	04-install-mcp 05-install-lx-loader 06-install-dos-toolbox \
 	07-install-ghidrassist 08-install-reveng 09-install-retsync 10-install-findcrypt \
-	11-install-binexport 12-install-scripts verify-extensions 13-pyghidra \
-	14-venv 15-register-mcp 16-install-rea test
+	11-install-binexport 12-install-scripts 13-install-reva verify-extensions 14-pyghidra \
+	15-venv 16-register-mcp 17-install-rea test
 
 install: $(PIPELINE) ## Run the full pipeline (all stages above, in order)
 	@$(OK) "Ghidra Bundle installed. Run 'make run' to launch Ghidra."
@@ -518,7 +522,8 @@ clean: ## Remove dist/, .venv/, REA's install in .rea/ and all build outputs
 		binexport/java/dist binexport/java/build binexport/java/.gradle \
 		python/bundle-mpq/build python/bundle-mpq/bundle_mpq.egg-info \
 		GhidrAssist/dist GhidrAssist/build GhidrAssist/.gradle \
-		plugin-ghidra/dist plugin-ghidra/build plugin-ghidra/.gradle
+		plugin-ghidra/dist plugin-ghidra/build plugin-ghidra/.gradle \
+		reverse-engineering-assistant/dist reverse-engineering-assistant/build reverse-engineering-assistant/.gradle
 
 distclean: clean ## clean, then de-initialize all submodules
 	git submodule deinit -f --all

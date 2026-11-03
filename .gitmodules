@@ -47,3 +47,8 @@
 	url = https://github.com/felipe-dos-santos81/plugin-ghidra.git
 	branch = portable-settings
 	shallow = true
+[submodule "reverse-engineering-assistant"]
+	path = reverse-engineering-assistant
+	url = https://github.com/cyberkaida/reverse-engineering-assistant.git
+	branch = main
+	shallow = true
