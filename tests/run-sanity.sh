@@ -7,7 +7,9 @@
 #        TEST_MCP_PORT=18089  port for the GhidraMCP test server (default 18089)
 #        TEST_IMPORT_TIMEOUT=600  seconds before a fixture import is killed (default 600)
 #        SANITY_ONLY=dist,jython  run only these sections: env, extensions, fixtures,
-#                                 mcp, dist, binexport, portable, jython, pyghidra, rea
+#                                 mcp, dist, binexport, portable, jython, pyghidra, reva,
+#                                 llm4decompile, rea
+#        LLM4DECOMPILE_MODEL=<tag> model the Makefile pulls; the installed properties must name it
 #        PACKAGES_DIR=<dir>       built zips to check (default: <install dir>/../packages)
 #        REA_BIN=<file>           REA wrapper written by `make install-rea` (default: <repo>/.rea/rea)
 # Needs GNU timeout (Linux: coreutils; macOS: `brew install coreutils` for gtimeout).
@@ -33,7 +35,7 @@ indent() { sed 's/^/    /'; }
 fail_with_log() { fail "$1"; tail -20 "$2" | indent; }  # fail_with_log <message> <log file>
 
 # want <section>: true when SANITY_ONLY is unset or lists <section> (comma-separated).
-SECTIONS=",env,extensions,fixtures,mcp,dist,binexport,portable,jython,pyghidra,rea,"
+SECTIONS=",env,extensions,fixtures,mcp,dist,binexport,portable,jython,pyghidra,reva,llm4decompile,rea,"
 want() { [[ -z "${SANITY_ONLY:-}" || ",$SANITY_ONLY," == *",$1,"* ]]; }
 SANITY_ONLY=${SANITY_ONLY:-}
 for section in ${SANITY_ONLY//,/ }; do
@@ -245,6 +247,7 @@ check_mcp() {
   mkdir -p "$WORK/mcp"/{home,settings,cache,temp}
   echo "Starting GhidraMCP headless server on 127.0.0.1:$MCP_PORT..."
   env -u GHIDRA_MCP_AUTH_TOKEN -u GHIDRA_MCP_PROJECT_FOLDER -u GHIDRA_MCP_FILE_ROOT \
+    GHIDRA_MCP_ALLOW_SCRIPTS=1 \
     "$JAVA_HOME/bin/java" -Djava.awt.headless=true \
     -Duser.home="$WORK/mcp/home" -Djava.io.tmpdir="$WORK/mcp/temp" \
     -Dapplication.settingsdir="$WORK/mcp/settings" \
@@ -344,6 +347,18 @@ print(names["compute"] if {"compute", "helper"} <= names.keys() else "")
     fail "GhidraMCP: /get_type_size confirms deletion (got ${out:0:200})"
   fi
 
+  # The agent route for the refine script: run_ghidra_script finds ./ghidra_scripts from
+  # the repo root (make test's working directory) and must return the script's FAIL line
+  # for a bad function name without a model request.
+  out=$(curl -s -m 120 -X POST -H 'Content-Type: application/json' \
+    -d '{"script_name":"LLM4DecompileRefine.java","args":"nosuchfn","timeout_seconds":60}' \
+    "$url/run_ghidra_script" || true)
+  if [[ "$out" == *"LLM4DECOMPILE FAIL no function nosuchfn"* ]]; then
+    pass "GhidraMCP: /run_ghidra_script runs LLM4DecompileRefine.java and returns its FAIL line"
+  else
+    fail "GhidraMCP: /run_ghidra_script LLM4DecompileRefine.java nosuchfn (got ${out:0:200})"
+  fi
+
   stop_mcp
 }
 
@@ -371,20 +386,21 @@ PACKAGE_PATTERNS=(
   "ghidra_{v}_*_plugin-ghidra.zip"
   "ghidra_{v}_*_ghidra-emotionengine-reloaded.zip"
   "ghidra_{v}_*_GhidraPS4Loader.zip"
+  "ghidra_{v}_*_reverse-engineering-assistant.zip"
 )
 # Build folders that must hold no current zip once install has moved them. The six
-# API-patched extensions build in disposable copies under dist/build/ (Makefile
-# stages 04-08 and 10), so each also guards its copy's zip output dir; the remaining
+# API-patched extensions and ReVa build in disposable copies under dist/build/ (Makefile
+# stages 04-08, 10 and 15), so each also guards its copy's zip output dir; the remaining
 # entries guard the extensions' source trees against accidental in-tree builds, plus
 # the unpatched ret-sync and BinExport trees.
 BUILD_OUTPUTS=(ghidra/build/dist ghidra-mcp/build/distributions lx-loader/dist dos-toolbox/dist
                ret-sync/ext_ghidra/dist GhidraFindcrypt/dist binexport/java/dist
                GhidrAssist/dist plugin-ghidra/dist ghidra-emotionengine-reloaded/dist
-               GhidraPS4Loader/dist
+               GhidraPS4Loader/dist reverse-engineering-assistant/dist
                dist/build/ghidra-mcp/build/distributions
                dist/build/lx-loader/dist dist/build/dos-toolbox/dist
                dist/build/GhidrAssist/dist dist/build/plugin-ghidra/dist
-               dist/build/GhidraFindcrypt/dist)
+               dist/build/GhidraFindcrypt/dist dist/build/reverse-engineering-assistant/dist)
 
 check_runtime() {
   local expected actual
@@ -575,7 +591,101 @@ check_pyghidra() {
 
 if want pyghidra; then check_pyghidra; fi
 
-# ── 3h. REA ───────────────────────────────────────────────────────────────────
+# ── 3h. ReVa ──────────────────────────────────────────────────────────────────
+# Runs ReVa's headless launcher inside pyghidraRun, which loads every installed
+# extension like the GUI does, so a jar clash with another extension fails here.
+check_reva() {
+  local log="$WORK/reva.log" ext="$INSTALL_DIR/Ghidra/Extensions/reverse-engineering-assistant" path status=0
+  if [[ ! -f "$ext/lib/reverse-engineering-assistant.jar" ]]; then
+    fail "ReVa: $ext/lib/reverse-engineering-assistant.jar is missing (run 'make install-reva')"
+    return
+  fi
+  path=$PATH
+  if [[ -n "${VIRTUAL_ENV:-}" ]]; then path=${path//"$VIRTUAL_ENV/bin:"/}; fi
+  (cd "$WORK" && env -u VIRTUAL_ENV PATH="$path" "$TIMEOUT" --foreground "${TEST_IMPORT_TIMEOUT:-600}" \
+    "$INSTALL_DIR/support/pyghidraRun" -H "$WORK/proj" "reva-$RANDOM" \
+    -import "$WORK/probe.bin" -loader BinaryLoader -processor x86:LE:32:default -noanalysis \
+    -deleteProject -scriptPath "$TESTS/probes" -preScript reva_probe.py < /dev/null > "$log" 2>&1) || status=$?
+  ((status == 0)) || echo "pyghidraRun exit status $status" >> "$log"
+  if grep -q 'REVA OK' "$log"; then
+    pass "ReVa: headless MCP server answers initialize and tools/list ($(grep -o 'REVA OK port .*' "$log" | head -n 1 | sed 's/ (GhidraScript).*//'))"
+  elif grep -q 'REVA FAIL' "$log"; then
+    fail "ReVa: $(grep -o 'REVA FAIL .*' "$log" | head -n 1 | sed 's/ (GhidraScript).*//')"
+  else
+    fail_with_log "ReVa: probe did not run" "$log"
+  fi
+}
+
+if want reva; then check_reva; fi
+
+# ── 3i. LLM4Decompile ─────────────────────────────────────────────────────────
+# run_script returns analyzeHeadless's status, which is 0 even when a script throws, so
+# every assertion reads the script's console lines.
+check_llm4decompile() {
+  local ext="$INSTALL_DIR/Ghidra/Extensions/LLM4Decompile" log="$WORK/llm4decompile.log"
+  local script="$ext/ghidra_scripts/LLM4DecompileRefine.java" model url want_model
+  if [[ ! -f "$script" || ! -f "$ext/llm4decompile.properties" ]]; then
+    fail "LLM4Decompile: $ext is incomplete (run 'make install-llm4decompile')"
+    return
+  fi
+  model=$(sed -n 's/^model=//p' "$ext/llm4decompile.properties")
+  url=$(sed -n 's/^url=//p' "$ext/llm4decompile.properties")
+  want_model=${LLM4DECOMPILE_MODEL:-}  # exported by the Makefile's test target
+  if [[ -n "$model" && ( -z "$want_model" || "$model" == "$want_model" ) ]]; then
+    pass "LLM4Decompile: properties name the Makefile's model ($model)"
+  else
+    fail "LLM4Decompile: properties model '$model' differs from the Makefile's '$want_model'"
+  fi
+  if [[ -z "$SAMPLE" ]]; then
+    fail "LLM4Decompile: not checked (needs sample.o, which clang could not build)"
+    return
+  fi
+  # Unknown function, then unreachable server: the script must compile, print one FAIL
+  # line each and never an OK line.
+  LLM4DECOMPILE_URL=http://127.0.0.1:1 run_script "$log" "$SAMPLE" LLM4DecompileRefine.java nosuchfn \
+    -postScript LLM4DecompileRefine.java compute || true
+  if grep -q 'LLM4DECOMPILE FAIL no function nosuchfn' "$log" \
+      && grep -q 'LLM4DECOMPILE FAIL cannot reach http://127.0.0.1:1' "$log" \
+      && ! grep -q 'LLM4DECOMPILE OK' "$log"; then
+    pass "LLM4Decompile: script compiles and reports a bad function and an unreachable server"
+  else
+    fail_with_log "LLM4Decompile: error runs did not report cleanly" "$log"
+    return
+  fi
+  if ! curl -sf -m 5 "$url/api/version" >/dev/null 2>&1; then
+    skip "LLM4Decompile: Ollama is not serving at $url (optional)"
+    return
+  fi
+  if ! ollama show "$model" >/dev/null 2>&1; then
+    skip "LLM4Decompile: model $model is not pulled (run 'make install-llm4decompile')"
+    return
+  fi
+  # Seed the plate comment with a user note and a stale block from another model, refine
+  # twice, then read the comment back: one block, the note kept, the stale block gone.
+  run_script "$log" "$SAMPLE" PlateComment.java compute seed \
+    -postScript LLM4DecompileRefine.java compute -postScript LLM4DecompileRefine.java compute \
+    -postScript PlateComment.java compute print || true
+  plate=$(sed -n '/PLATE BEGIN/,/PLATE END/p' "$log")
+  if (($(grep -c 'LLM4DECOMPILE OK compute' "$log") == 2)) && (($(grep -c 'LLM4DECOMPILE REPLACED' "$log") == 2)) \
+      && sed -n '/LLM4DECOMPILE OK compute/,$p' "$log" | grep -q '{' \
+      && sed -n '/LLM4DECOMPILE OK compute/,$p' "$log" | grep -q '}'; then
+    pass "LLM4Decompile: refined compute twice through $model ($(grep -o 'LLM4DECOMPILE OK compute [0-9]* chars' "$log" | head -n 1))"
+  else
+    fail_with_log "LLM4Decompile: refining compute failed" "$log"
+    return
+  fi
+  if (($(grep -c -- '--- LLM4Decompile (' <<< "$plate") == 1)) && grep -q 'user note' <<< "$plate" \
+      && ! grep -q 'old junk' <<< "$plate"; then
+    pass "LLM4Decompile: plate comment keeps the user's note and holds exactly one block"
+  else
+    fail "LLM4Decompile: plate comment after two runs:"
+    printf '%s\n' "$plate" | indent
+  fi
+}
+
+if want llm4decompile; then check_llm4decompile; fi
+
+# ── 3j. REA ───────────────────────────────────────────────────────────────────
 check_rea_patch() {
   local log="$WORK/rea-policy-tests.log"
   if python3 -I "$TESTS/test_patch_rea_ghidra.py" > "$log" 2>&1; then

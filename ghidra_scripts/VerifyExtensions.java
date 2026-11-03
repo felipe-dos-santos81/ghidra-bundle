@@ -38,6 +38,7 @@ public class VerifyExtensions extends GhidraScript {
 		check("ghidra-emotionengine-reloaded", Analyzer.class, "StabsAnalyzer");
 		checkLanguage("ghidra-emotionengine-reloaded", "r5900:LE:32:default");
 		check("GhidraPS4Loader", Loader.class, "GhidraPS4Loader");
+		check("reverse-engineering-assistant", Plugin.class, "RevaPlugin");
 	}
 
 	private void checkLanguage(String extension, String languageId) {

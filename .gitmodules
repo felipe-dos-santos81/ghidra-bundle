@@ -57,3 +57,8 @@
 	url = https://github.com/felipe-dos-santos81/GhidraPS4Loader.git
 	branch = ghidra-12.2
 	shallow = true
+[submodule "reverse-engineering-assistant"]
+	path = reverse-engineering-assistant
+	url = https://github.com/cyberkaida/reverse-engineering-assistant.git
+	branch = main
+	shallow = true

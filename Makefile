@@ -12,6 +12,9 @@ SHELL := /bin/bash
 GHIDRA_VERSION := 12.2
 JAVA_MAJOR := 25
 MCP_PORT := 8089
+REVA_PORT := 8080
+LLM4DECOMPILE_MODEL := hf.co/mradermacher/llm4decompile-9b-v2-GGUF:Q8_0
+OLLAMA_URL := http://127.0.0.1:11434
 
 BUNDLE_DIR := $(CURDIR)
 DIST_DIR := $(BUNDLE_DIR)/dist
@@ -34,6 +37,8 @@ REVENG_BUILD_DIR := $(DIST_DIR)/build/plugin-ghidra
 REVENG_PATCH_ID = plugin-ghidra-$(EXT_PATCH_HASH)
 FINDCRYPT_BUILD_DIR := $(DIST_DIR)/build/GhidraFindcrypt
 FINDCRYPT_PATCH_ID = ghidrafindcrypt-$(EXT_PATCH_HASH)
+REVA_BUILD_DIR := $(DIST_DIR)/build/reverse-engineering-assistant
+REVA_PATCH_ID = reverse-engineering-assistant-$(EXT_PATCH_HASH)
 VENV_DIR := $(BUNDLE_DIR)/.venv
 BRIDGE_BIN := $(VENV_DIR)/bin/bridge-mcp-ghidra
 OPENCODE_CONFIG := $(HOME)/.config/opencode/opencode.json
@@ -108,8 +113,9 @@ GHIDRA_ZIP = ghidra_$(1)_*_[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].zip
 	08-install-reveng install-reveng 09-install-retsync install-retsync \
 	10-install-findcrypt install-findcrypt 11-install-binexport install-binexport \
 	12-install-emotionengine install-emotionengine 13-install-ps4loader install-ps4loader \
-	14-install-scripts install-scripts verify-extensions 15-pyghidra pyghidra \
-	16-venv venv 17-register-mcp register-mcp 18-install-rea install-rea \
+	14-install-scripts install-scripts 15-install-reva install-reva verify-extensions \
+	16-pyghidra pyghidra 17-venv venv 18-register-mcp register-mcp 19-install-rea install-rea \
+	20-install-llm4decompile install-llm4decompile \
 	test install check-jdk-gui run run-bridge verify clean distclean
 
 help: ## Show this help
@@ -157,7 +163,7 @@ help: ## Show this help
 check_tool = command -v $(1) >/dev/null 2>&1 || { $(ERR) "$(2) not found on PATH (run 'make deps')"; exit 1; }; \
 	$(TICK) "$(2)" "$$($(3) 2>&1 | head -n 1)"
 
-00-env: ## Check host prerequisites (StormLib and Node.js optional)
+00-env: ## Check host prerequisites (StormLib, Node.js and Ollama optional)
 	@$(call jdk_usable,$(JAVA25_HOME)) || \
 		{ $(ERR) "JAVA25_HOME is not a usable JDK $(JAVA_MAJOR) (needs executable bin/java and bin/javac reporting major $(JAVA_MAJOR)): '$(JAVA25_HOME)' (run 'make deps')"; exit 1; }
 	@$(TICK) "JDK 25" "$(JAVA25_HOME)"
@@ -179,6 +185,11 @@ check_tool = command -v $(1) >/dev/null 2>&1 || { $(ERR) "$(2) not found on PATH
 		$(TICK) "Node.js" "$$(node --version) (REA)"; \
 	else \
 		$(WARN) "$(REA_NODE_WANT) not found: optional, needed for REA"; \
+	fi
+	@if command -v ollama >/dev/null 2>&1 && ollama list >/dev/null 2>&1; then \
+		$(TICK) "Ollama" "$$(ollama --version 2>&1 | head -n 1) (LLM4Decompile)"; \
+	else \
+		$(WARN) "Ollama not found or not serving: optional, needed to run the LLM4Decompile model"; \
 	fi
 	@$(OK) "Environment check passed."
 
@@ -241,7 +252,7 @@ checkout: 01-checkout
 build-ghidra: 02-build-ghidra
 install-ghidra: 03-install-ghidra
 
-# ── Stages 4–15: Extensions, scripts and PyGhidra ─────────────────────────────
+# ── Stages 4–16: Extensions, scripts and PyGhidra ─────────────────────────────
 
 # $(call install_extension,directory,source dir,zip glob[,legacy directory to remove][,gradle subdir][,commit dir][,patch identity])
 # Builds an extension with ghidra/gradlew (in <source dir>/<gradle subdir>), moves the
@@ -334,6 +345,11 @@ endef
 	fi
 	@scripts/install-d2gridratools.sh D2GridraTools "$(EXT_DIR)" "$(GHIDRA_VERSION)"
 
+15-install-reva: 03-install-ghidra ## Build and install ReVa (MCP server on port 8080; MCP SDK and Jackson shaded)
+	@python3 -I $(EXT_PATCH_SCRIPT) reverse-engineering-assistant \
+		reverse-engineering-assistant "$(REVA_BUILD_DIR)" "$(GHIDRA_VERSION)" || exit 1;
+	$(call install_extension,reverse-engineering-assistant,$(REVA_BUILD_DIR),$(REVA_BUILD_DIR)/dist/ghidra_$(GHIDRA_VERSION)_*_reverse-engineering-assistant.zip,,,reverse-engineering-assistant,$(REVA_PATCH_ID))
+
 verify-extensions: ## Check headlessly that Ghidra loads every extension's classes
 	@[ -x "$(INSTALL_DIR)/support/analyzeHeadless" ] || { $(ERR) "Ghidra not installed; run 'make install'"; exit 1; }
 	@echo "Checking extension class discovery (headless)..."
@@ -352,7 +368,7 @@ verify-extensions: ## Check headlessly that Ghidra loads every extension's class
 	fi
 	@$(OK) "All extension classes loaded."
 
-15-pyghidra: 03-install-ghidra ## Set up PyGhidra's venv (in portable/) with the bundle_mpq MPQ reader
+16-pyghidra: 03-install-ghidra ## Set up PyGhidra's venv (in portable/) with the bundle_mpq MPQ reader
 	@VENV=$$(python3 -I scripts/pyghidra-venv-dir.py "$(INSTALL_DIR)") || exit 1; \
 	PY="$$VENV/bin/python3"; WHEELS="$(INSTALL_DIR)/Ghidra/Features/PyGhidra/pypkg/dist"; \
 	SRC=$$(git hash-object $(BUNDLE_MPQ_SRC)/pyproject.toml $(BUNDLE_MPQ_SRC)/bundle_mpq/*.py | tr -d '\n'); \
@@ -386,11 +402,12 @@ install-binexport: 11-install-binexport
 install-emotionengine: 12-install-emotionengine
 install-ps4loader: 13-install-ps4loader
 install-scripts: 14-install-scripts
-pyghidra: 15-pyghidra
+install-reva: 15-install-reva
+pyghidra: 16-pyghidra
 
-# ── Stages 16–17: MCP bridge ──────────────────────────────────────────────────
+# ── Stages 17–18: MCP bridge ──────────────────────────────────────────────────
 
-16-venv: 01-checkout ## Create .venv and install bridge-mcp-ghidra (editable)
+17-venv: 01-checkout ## Create .venv and install bridge-mcp-ghidra (editable)
 	@if [ -x "$(BRIDGE_BIN)" ]; then \
 		echo "$(VENV_DIR) already set up, skipping."; \
 	else \
@@ -405,7 +422,9 @@ define REGISTER_OPENCODE
 import json, os, sys
 path = "$(OPENCODE_CONFIG)"
 name = os.environ["MCP_NAME"]
-entry = {"type": "local", "command": json.loads(os.environ["MCP_COMMAND"]), "enabled": True}
+url = os.environ.get("MCP_URL")
+entry = ({"type": "remote", "url": url, "enabled": True} if url
+         else {"type": "local", "command": json.loads(os.environ["MCP_COMMAND"]), "enabled": True})
 try:
     with open(path, encoding="utf-8") as f:
         text = f.read()
@@ -443,19 +462,34 @@ define register_mcp
 	fi
 endef
 
-17-register-mcp: 16-venv ## Register the "ghidra" MCP server with opencode and Claude Code
+# $(call register_mcp_http,name,url): register a streamable-HTTP MCP server with opencode and Claude Code.
+define register_mcp_http
+	mkdir -p "$(dir $(OPENCODE_CONFIG))"; \
+	MCP_NAME=$(1) MCP_URL='$(2)' python3 -c "$$REGISTER_OPENCODE" || exit 1; \
+	if ! command -v claude >/dev/null 2>&1; then \
+		$(WARN) "claude CLI not found, skipping Claude Code registration."; \
+	elif claude mcp get $(1) 2>/dev/null | grep -qF "$(2)"; then \
+		echo "Claude Code: $(1) MCP server already registered"; \
+	else \
+		claude mcp remove $(1) --scope user >/dev/null 2>&1; \
+		claude mcp add --scope user --transport http $(1) "$(2)" || exit 1; \
+	fi
+endef
+
+18-register-mcp: 17-venv ## Register the "ghidra" and "reva" MCP servers with opencode and Claude Code
 	@$(call register_mcp,ghidra,$(BRIDGE_BIN))
+	@$(call register_mcp_http,reva,http://127.0.0.1:$(REVA_PORT)/mcp/message)
 
-venv: 16-venv
-register-mcp: 17-register-mcp
+venv: 17-venv
+register-mcp: 18-register-mcp
 
-# ── Stage 18: REA ─────────────────────────────────────────────────────────────
+# ── Stage 19: REA ─────────────────────────────────────────────────────────────
 
 # REA runs this Ghidra headlessly through its own bridge. The stage patches the pinned
 # policy for Ghidra 12.2, then writes a wrapper bound to this install and JDK. The wrapper
 # uses node's absolute path and keeps sessions in portable/temp. Unsuitable Node.js or an
 # npm failure skips REA; a policy-patch failure stops the stage.
-18-install-rea: 03-install-ghidra ## Install REA, apply the Ghidra 12.2 patch, and register its MCP server (optional)
+19-install-rea: 03-install-ghidra ## Install REA, apply the Ghidra 12.2 patch, and register its MCP server (optional)
 	@skip() { $(WARN) "$$1: skipping REA (optional)."; \
 		"$(REA_BIN)" --version >/dev/null 2>&1 || rm -f "$(REA_BIN)"; exit 0; }; \
 	{ $(REA_NODE_CHECK); } 2>/dev/null || skip "$(REA_NODE_WANT) not found"; \
@@ -478,7 +512,15 @@ register-mcp: 17-register-mcp
 		&& chmod +x "$(REA_BIN)" || exit 1; \
 	$(call register_mcp,rea,$(REA_BIN),--mcp)
 
-install-rea: 18-install-rea
+install-rea: 19-install-rea
+
+# ── Stage 20: LLM4Decompile ───────────────────────────────────────────────────
+
+20-install-llm4decompile: 03-install-ghidra ## Install the LLM4Decompile refine script and pull its model into Ollama (optional)
+	@scripts/install-llm4decompile.sh ghidra_scripts/LLM4DecompileRefine.java "$(EXT_DIR)" "$(GHIDRA_VERSION)" \
+		"$(LLM4DECOMPILE_MODEL)" "$(OLLAMA_URL)"
+
+install-llm4decompile: 20-install-llm4decompile
 
 # ── Pipeline & runtime ────────────────────────────────────────────────────────
 
@@ -486,37 +528,46 @@ PIPELINE := 00-deps 00-env 01-checkout 02-build-ghidra 03-install-ghidra \
 	04-install-mcp 05-install-lx-loader 06-install-dos-toolbox \
 	07-install-ghidrassist 08-install-reveng 09-install-retsync 10-install-findcrypt \
 	11-install-binexport 12-install-emotionengine 13-install-ps4loader \
-	14-install-scripts verify-extensions 15-pyghidra 16-venv 17-register-mcp \
-	18-install-rea test
+	14-install-scripts 15-install-reva verify-extensions 16-pyghidra 17-venv 18-register-mcp \
+	19-install-rea 20-install-llm4decompile test
 
 install: $(PIPELINE) ## Run the full pipeline (all stages above, in order)
 	@$(OK) "Ghidra Bundle installed. Run 'make run' to launch Ghidra."
 
 test: ## Run all sanity checks
 	@$(call jdk_usable,$(JAVA25_HOME)) || { $(ERR) "JDK 25 not found (run 'make deps')"; exit 1; }
-	@PACKAGES_DIR="$(PACKAGES_DIR)" REA_BIN="$(REA_BIN)" tests/run-sanity.sh "$(INSTALL_DIR)" "$(JAVA25_HOME)"
+	@PACKAGES_DIR="$(PACKAGES_DIR)" REA_BIN="$(REA_BIN)" LLM4DECOMPILE_MODEL="$(LLM4DECOMPILE_MODEL)" \
+		tests/run-sanity.sh "$(INSTALL_DIR)" "$(JAVA25_HOME)"
 
 # Internal target used by `make test` to exercise the GUI-capability check.
 check-jdk-gui:
 	@$(check_jdk_gui)
 
-run: ## Launch Ghidra (fails if port 8089 is already in use)
+run: ## Launch Ghidra with script execution enabled for GhidraMCP (fails if port 8089 is in use)
 	@[ -x "$(INSTALL_DIR)/ghidraRun" ] || { $(ERR) "Ghidra not installed; run 'make install'"; exit 1; }
 	@$(check_jdk_gui)
 	@if { command -v lsof >/dev/null && lsof -i :$(MCP_PORT); } || \
 		{ command -v ss >/dev/null && ss -ltnp 2>/dev/null | grep ':$(MCP_PORT) '; }; then \
 		$(ERR) "port $(MCP_PORT) is already in use (see above)"; exit 1; \
 	fi
-	"$(INSTALL_DIR)/ghidraRun"
+	@if { command -v lsof >/dev/null && lsof -i :$(REVA_PORT); } || \
+		{ command -v ss >/dev/null && ss -ltnp 2>/dev/null | grep ':$(REVA_PORT) '; }; then \
+		$(WARN) "port $(REVA_PORT) is already in use; ReVa will not be able to listen (see above)"; \
+	fi
+	GHIDRA_MCP_ALLOW_SCRIPTS=1 "$(INSTALL_DIR)/ghidraRun"
 
 run-bridge: ## Run bridge-mcp-ghidra over stdio
 	@[ -x "$(BRIDGE_BIN)" ] || { $(ERR) "$(BRIDGE_BIN) not found; run 'make venv'"; exit 1; }
 	@"$(BRIDGE_BIN)"
 
-verify: ## Check that the GhidraMCP plugin answers on port 8089
+verify: ## Check that GhidraMCP answers on port 8089 (and ReVa on 8080, warning only)
 	@curl -sf http://127.0.0.1:$(MCP_PORT)/check_connection && echo || \
 		{ $(ERR) "no GhidraMCP on port $(MCP_PORT): run Ghidra and open a program in the CodeBrowser"; exit 1; }
 	@$(OK) "GhidraMCP is answering on port $(MCP_PORT)."
+	@curl -sf -m 10 -o /dev/null -X POST -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+		-d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"make-verify","version":"0"}}}' \
+		http://127.0.0.1:$(REVA_PORT)/mcp/message && $(OK) "ReVa is answering on port $(REVA_PORT)." || \
+		$(WARN) "no ReVa on port $(REVA_PORT): enable the ReVa plugins in Ghidra (see README)"
 
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 
@@ -532,7 +583,8 @@ clean: ## Remove dist/, .venv/, REA's install in .rea/ and all build outputs
 		plugin-ghidra/dist plugin-ghidra/build plugin-ghidra/.gradle \
 		ghidra-emotionengine-reloaded/dist ghidra-emotionengine-reloaded/build \
 		ghidra-emotionengine-reloaded/.gradle \
-		GhidraPS4Loader/dist GhidraPS4Loader/build GhidraPS4Loader/.gradle
+		GhidraPS4Loader/dist GhidraPS4Loader/build GhidraPS4Loader/.gradle \
+		reverse-engineering-assistant/dist reverse-engineering-assistant/build reverse-engineering-assistant/.gradle
 
 distclean: clean ## clean, then de-initialize all submodules
 	git submodule deinit -f --all

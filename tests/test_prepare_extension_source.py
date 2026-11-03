@@ -869,5 +869,119 @@ class PrepareExtensionSourceTest(unittest.TestCase):
             patch_source("unknown-extension", "", "12.2")
 
 
+class PrepareRevaTest(unittest.TestCase):
+    """ReVa needs no API fix on 12.2; its patch shades the MCP SDK and Jackson into its jar
+    so GhidrAssist's older copies, which Ghidra loads first, cannot capture its calls."""
+
+    RELATIVE_PATH = Path("build.gradle")
+    PLUGINS_ANCHOR = (
+        '//----------------------START "DO NOT MODIFY" SECTION------------------------------\n'
+        "def ghidraInstallDir\n"
+    )
+    TAIL_ANCHOR = (
+        "// Exclude additional files from the built extension\n"
+        "// Ex: buildExtension.exclude '.idea/**'\n"
+    )
+    PLUGINS_BLOCK = "plugins {\n\tid 'com.gradleup.shadow' version '9.6.1'\n}\n\n"
+    SOURCE = (
+        "/* license */\n"
+        "// Builds a Ghidra Extension for a given Ghidra installation.\n"
+        + PLUGINS_ANCHOR
+        + "\nif (System.env.GHIDRA_INSTALL_DIR) {\n"
+        "\tghidraInstallDir = System.env.GHIDRA_INSTALL_DIR\n"
+        "}\n\n"
+        "dependencies {\n"
+        '\timplementation platform("io.modelcontextprotocol.sdk:mcp-bom:2.1.0")\n'
+        "}\n\n"
+        + TAIL_ANCHOR
+    )
+    RELOCATIONS = (
+        "relocate 'io.modelcontextprotocol', 'reva.shaded.io.modelcontextprotocol'",
+        "relocate 'com.fasterxml.jackson', 'reva.shaded.com.fasterxml.jackson'",
+        "relocate 'com.networknt', 'reva.shaded.com.networknt'",
+        "relocate 'org.yaml.snakeyaml', 'reva.shaded.org.yaml.snakeyaml'",
+        "relocate 'com.ethlo', 'reva.shaded.com.ethlo'",
+    )
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.destination = self.root / "dist" / "build" / "reverse-engineering-assistant"
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def make_source(self):
+        source = self.root / "source"
+        source.mkdir()
+        (source / self.RELATIVE_PATH).write_text(self.SOURCE, encoding="utf-8")
+        (source / "extension.properties").write_text("name=ReVa\n", encoding="utf-8")
+        return source
+
+    def assert_shaded(self, patched):
+        self.assertEqual(1, patched.count(self.PLUGINS_BLOCK))
+        self.assertGreater(patched.index(self.PLUGINS_BLOCK), 0)  # after the leading comments
+        self.assertLess(patched.index(self.PLUGINS_BLOCK), patched.index(self.PLUGINS_ANCHOR))
+        self.assertEqual(1, patched.count(self.TAIL_ANCHOR))
+        tail = patched[patched.index(self.TAIL_ANCHOR) + len(self.TAIL_ANCHOR):]
+        for relocation in self.RELOCATIONS:
+            self.assertEqual(1, tail.count(relocation))
+        self.assertIn("configurations = project.configurations.named('shade').map { [it] }", tail)
+        self.assertIn("archiveClassifier = 'thin'", tail)
+        self.assertIn("'*-thin.jar', '**/lib/mcp-*.jar', '**/lib/jackson-*.jar'", tail)
+        self.assertIn("exclude group: 'org.slf4j'", tail)
+        self.assertNotIn("relocate 'org.slf4j'", tail)
+
+    def test_reva_patch_adds_shadow_plugin_and_shade_block_and_is_idempotent(self):
+        patched = patch_source("reverse-engineering-assistant", self.SOURCE, "12.2")
+
+        self.assert_shaded(patched)
+        self.assertEqual(patched, patch_source("reverse-engineering-assistant", patched, "12.2"))
+
+    def test_prepare_reva_source_preserves_original_and_other_files(self):
+        source = self.make_source()
+        original = tree_bytes(source)
+
+        prepare_source("reverse-engineering-assistant", source, self.destination, "12.2")
+
+        self.assert_shaded((self.destination / self.RELATIVE_PATH).read_text(encoding="utf-8"))
+        self.assertEqual(
+            "name=ReVa\n", (self.destination / "extension.properties").read_text(encoding="utf-8")
+        )
+        self.assertEqual(original, tree_bytes(source))
+
+    def test_reva_rejects_missing_duplicated_or_partial_anchors(self):
+        patched = patch_source("reverse-engineering-assistant", self.SOURCE, "12.2")
+        variants = {
+            "empty": "",
+            "missing plugins anchor": self.SOURCE.replace(self.PLUGINS_ANCHOR, "", 1),
+            "missing tail anchor": self.SOURCE.replace(self.TAIL_ANCHOR, "", 1),
+            "duplicated tail anchor": self.SOURCE + self.TAIL_ANCHOR,
+            "plugins block without shade block": self.SOURCE.replace(
+                self.PLUGINS_ANCHOR, self.PLUGINS_BLOCK + self.PLUGINS_ANCHOR, 1
+            ),
+            "shade block without plugins block": patched.replace(self.PLUGINS_BLOCK, "", 1),
+        }
+        for name, variant in variants.items():
+            with self.subTest(variant=name):
+                with self.assertRaises(PatchError):
+                    patch_source("reverse-engineering-assistant", variant, "12.2")
+        with self.assertRaises(PatchError):
+            patch_source("reverse-engineering-assistant", self.SOURCE, "12.2.1")
+
+    def test_real_reva_source_patches_read_only(self):
+        build_file = ROOT / "reverse-engineering-assistant" / self.RELATIVE_PATH
+        original = build_file.read_bytes()
+        source = original.decode("utf-8")
+        for anchor in (self.PLUGINS_ANCHOR, self.TAIL_ANCHOR):
+            self.assertEqual(1, source.count(anchor))
+        self.assertNotIn("com.gradleup.shadow", source)
+
+        patched = patch_source("reverse-engineering-assistant", source, "12.2")
+
+        self.assert_shaded(patched)
+        self.assertEqual(original, build_file.read_bytes())
+
+
 if __name__ == "__main__":
     unittest.main()
