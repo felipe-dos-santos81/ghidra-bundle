@@ -6,9 +6,10 @@ Operational context, invariants and conventions for AI coding agents working in 
 
 ## 1. Project Overview
 
-`ghidra-bundle` builds an isolated, reproducible **Ghidra 12.2** from source, with eight extensions, the Jython runtime, D2GridraTools scripts, a PyGhidra venv and a local Model Context Protocol (MCP) bridge:
+`ghidra-bundle` builds an isolated, reproducible **Ghidra 12.2** from source, with nine extensions, the Jython runtime, D2GridraTools scripts, a PyGhidra venv and a local Model Context Protocol (MCP) bridge:
 - **Ghidra 12.2**: built headlessly with Gradle from the `Ghidra_12.2_build` tag.
 - **GhidraMCP**: HTTP server plugin (port 8089) and Python bridge (`bridge-mcp-ghidra`).
+- **ReVa** (`reverse-engineering-assistant`): MCP server plugin (streamable HTTP, 127.0.0.1:8080), registered as `reva`.
 - **lx-loader**: Linear Executable (`LE`/`LX`) loader (DOS/4GW, OS/2, VxD).
 - **GhidraDosToolbox**: MS-DOS loader and analyzers (`wip-ghidra-12` branch).
 - **GhidrAssist** (fork): LLM assistant, installed unconfigured; no provider or key ships.
@@ -18,6 +19,7 @@ Operational context, invariants and conventions for AI coding agents working in 
 - **BinExport**: exporter for BinDiff.
 - **D2GridraTools** + **Jython**: Diablo 2 1.14d scripts, run under Ghidra's optional Jython extension.
 - **PyGhidra + `bundle_mpq`**: PyGhidra's venv in `portable/`, with a ctypes StormLib MPQ reader (`python/bundle-mpq`).
+- **LLM4Decompile**: `ghidra_scripts/LLM4DecompileRefine.java`, installed as a scripts-only extension; refines a function's pseudo-C through an LLM4Decompile-Ref model served by Ollama (optional, pulled by `make install`).
 - **REA** (`rea-agents` 6.3.0, optional): CLI and MCP server (`rea`) that analyzes files through this Ghidra headlessly, installed in `.rea/`. Needs Node.js.
 
 ---
@@ -45,11 +47,11 @@ Operational context, invariants and conventions for AI coding agents working in 
   - `GhidraMCP/` (`lib/GhidraMCP-<ver>.jar`)
   - `lx-loader/` (`lib/lx-loader.jar`)
   - `dos-toolbox/` (`lib/dos-toolbox.jar`)
-  - `GhidrAssist/`, `plugin-ghidra/`, `retsync/`, `GhidraFindcrypt/`, `BinExport/` (each `lib/<same name>.jar`)
-  - `Jython/` (from Ghidra's own `Extensions/Ghidra/` zip) and `D2GridraTools/` (assembled by `scripts/install-d2gridratools.sh`)
+  - `GhidrAssist/`, `plugin-ghidra/`, `retsync/`, `GhidraFindcrypt/`, `BinExport/`, `reverse-engineering-assistant/` (each `lib/<same name>.jar`)
+  - `Jython/` (from Ghidra's own `Extensions/Ghidra/` zip), `D2GridraTools/` (assembled by `scripts/install-d2gridratools.sh`) and `LLM4Decompile/` (scripts only, assembled by `scripts/install-llm4decompile.sh`)
 - **Never rename an extension directory.** Outside development mode, Ghidra's `ClassSearcher` only scans `<ext>/lib/<jar>.jar` when the jar name starts with the directory name. A renamed extension still shows its scripts but silently loses its loaders, analyzers and plugins.
-- **Submodule paths `GhidrAssist`, `plugin-ghidra` and `GhidraFindcrypt` must not change**: those projects have no `settings.gradle`, so Gradle names the extension (zip, directory and jar) after the checkout directory.
-- `make verify-extensions` (a pipeline stage before `13-pyghidra`, and run again by `make test`) uses `ghidra_scripts/VerifyExtensions.java` to confirm headlessly that each extension's key classes are loaded. Add a check there when adding an extension.
+- **Submodule paths `GhidrAssist`, `plugin-ghidra`, `GhidraFindcrypt` and `reverse-engineering-assistant` must not change**: those projects have no `settings.gradle`, so Gradle names the extension (zip, directory and jar) after the checkout directory.
+- `make verify-extensions` (a pipeline stage before `14-pyghidra`, and run again by `make test`) uses `ghidra_scripts/VerifyExtensions.java` to confirm headlessly that each extension's key classes are loaded. Add a check there when adding an extension.
 
 ### 2.3 Submodules & Versions
 - Upstream repositories are shallow submodules:
@@ -60,6 +62,7 @@ Operational context, invariants and conventions for AI coding agents working in 
   - `GhidrAssist` (felipe-dos-santos81/GhidrAssist, `portable-settings`): symgraph/GhidrAssist `master` plus the portable-settings fix, pinned to tag `bundle-pin-267c45a`.
   - `plugin-ghidra` (felipe-dos-santos81/plugin-ghidra, `portable-settings`): RevEngAI/plugin-ghidra `main` plus the portable-settings fix, pinned to tag `bundle-pin-7e8a68b`.
   - Never force-push the forks' `portable-settings` branches or delete their `bundle-pin-*` tags; point them back at upstream once the fixes are merged there.
+  - `reverse-engineering-assistant` (cyberkaida/reverse-engineering-assistant, `main`): pinned to commit `4d2fc5b`, which upstream CI tests on Ghidra 12.2; no 12.2 release exists yet. Builds without source patches.
   - `ret-sync` (bootleg/ret-sync, `master`; the Ghidra extension is in `ext_ghidra/`, and upstream commits old 10.x zips to `ext_ghidra/dist/`)
   - `GhidraFindcrypt` (antoniovazquezblanco/GhidraFindcrypt, `main`)
   - `binexport` (google/binexport, `main`; the Ghidra extension is in `java/`)
@@ -73,17 +76,18 @@ Operational context, invariants and conventions for AI coding agents working in 
 - `.venv/` (Python 3.10+) holds `ghidra-mcp` installed in editable mode (`pip install -e ./ghidra-mcp`).
 - The bridge entry point is `$(BRIDGE_BIN)` = `.venv/bin/bridge-mcp-ghidra`.
 
-### 2.5 Port 8089
-- Port `8089` (`MCP_PORT`) is reserved for GhidraMCP's HTTP server.
-- `make run` fails fast if the port is in use (checked with `lsof`, or `ss` when `lsof` is missing).
-- ret-sync listens on 127.0.0.1:9100 only when enabled; `make test` uses 18089.
+### 2.5 Ports and script execution
+- Port `8089` (`MCP_PORT`) is reserved for GhidraMCP's HTTP server; `make run` fails fast if it is in use (checked with `lsof`, or `ss` when `lsof` is missing).
+- Port `8080` (`REVA_PORT`) is ReVa's default. It is a Ghidra tool option the Makefile cannot set, so `REVA_PORT` only names what the bundle registers and checks: `make run` warns when 8080 is busy, and `make verify` warns when ReVa does not answer (it listens only once its plugins are enabled).
+- `make run` exports `GHIDRA_MCP_ALLOW_SCRIPTS=1`, so GhidraMCP's script tools run arbitrary Ghidra scripts for any local client on 8089. The README owns that posture; do not export it anywhere else.
+- ret-sync listens on 127.0.0.1:9100 only when enabled; `make test` uses 18089 and a random port for ReVa.
 
 ### 2.6 Packages
 - Every built zip ends up in `dist/packages/`, one per artifact. `install_extension` moves the zip there (deleting older versions and stale same-version builds) and unzips from there; an extension stage skips only when its zip is present in `dist/packages/`.
 - Stage 02 uses `$(call GHIDRA_ZIP,<version>)` to select Ghidra's date-suffixed installation zip (`ghidra_<version>_<release>_<yyyymmdd>.zip`) rather than extension zips. Ghidra 12.2 removed the old platform suffix. Legacy installations and packages are not migrated; remove superseded artifacts explicitly.
 
 ### 2.7 PyGhidra
-- `13-pyghidra` creates the venv where `pyghidraRun` looks for it (`scripts/pyghidra-venv-dir.py` asks Ghidra's `pyghidra_launcher`), installs Ghidra's bundled `pyghidra` wheels offline, and installs `python/bundle-mpq` (rebuilt when its source hash changes).
+- `14-pyghidra` creates the venv where `pyghidraRun` looks for it (`scripts/pyghidra-venv-dir.py` asks Ghidra's `pyghidra_launcher`), installs Ghidra's bundled `pyghidra` wheels offline, and installs `python/bundle-mpq` (rebuilt when its source hash changes).
 - StormLib (`libstorm-dev`) is optional: without it the stage warns and `make test` reports SKIP for MPQ checks.
 
 ### 2.8 REA
@@ -102,6 +106,19 @@ Operational context, invariants and conventions for AI coding agents working in 
 - Rebuild identity: `install_extension`'s optional 6th argument names the original submodule whose `git rev-parse HEAD` goes into `<ext>/.bundle-source`; the optional 7th is the patch identity written to `<ext>/.bundle-patch`. Patched stages pass `<extension>-$(shell git hash-object scripts/prepare-extension-source.py)`, so editing the script forces every patched extension to rebuild; the build copy is regenerated on every stage run, so patched sources cannot go stale.
 - To extend the mechanism for a new API break: add the extension's exact old→new anchors (with counts) to `EXTENSIONS` in `scripts/prepare-extension-source.py`, mirror a stage's `*_BUILD_DIR`/`*_PATCH_ID` wiring under `dist/build/`, add tests to `tests/test_prepare_extension_source.py`, and add its real zip output directory to `BUILD_OUTPUTS` in `tests/run-sanity.sh` (which guards both the original build-output dirs and the actual `dist/build/` copies). A break without an exact, tested transformation is still a stop, not a guess.
 - `tests/test_prepare_extension_source.py` covers every transformation, idempotence, fail-closed anchor rejection and read-only application against the real pinned submodule sources; run it standalone (`python3 -I tests/test_prepare_extension_source.py`). The `rea` sanity section separately runs `tests/test_patch_rea_ghidra.py`.
+
+### 2.10 ReVa
+- In GUI mode ReVa keeps its settings in Ghidra tool options (`ToolOptionsBackend`), so they live under `portable/settings`; its file-backed configuration exists only headlessly with a caller-supplied path. No portable patch.
+- `make test`'s `reva` section runs `tests/probes/reva_probe.py` under `pyghidraRun -H`, which loads every installed extension like the GUI does: it starts `reva.headless.RevaHeadlessLauncher` on a random port and sends an MCP `initialize`. ReVa ships MCP SDK 2.1 and Jackson 2.22 next to GhidrAssist's MCP SDK 0.17 and Jackson 2.19 on Ghidra's flat extension class path; this probe is what proves they coexist. A linkage error there is a stop (shading or a source patch is new scope), not a guess.
+- ReVa's `run-script` tool runs Python scripts only and refuses under a GUI not launched through PyGhidra; Java scripts reach agents through GhidraMCP's `run_ghidra_script` (section 2.5).
+- Registration uses `register_mcp_http` (`claude mcp add --transport http`, opencode `{"type": "remote", "url": ...}`), endpoint `http://127.0.0.1:8080/mcp/message`.
+
+### 2.11 LLM4Decompile
+- Upstream ships models, not Ghidra code. `ghidra_scripts/LLM4DecompileRefine.java` is the bundle's own script and the source of truth; stage 18 copies it into `Ghidra/Extensions/LLM4Decompile/ghidra_scripts/` with `extension.properties`, an empty `Module.manifest` and `llm4decompile.properties` (`model=`, `url=`), and stamps `.bundle-source` with the script hash, installer hash, model and URL.
+- `LLM4DECOMPILE_MODEL` in the `Makefile` is the single model pin (`hf.co/mradermacher/llm4decompile-9b-v2-GGUF:Q8_0`, a third-party GGUF of the authors' 9B-v2 weights); `OLLAMA_URL` is `http://127.0.0.1:11434`. The script reads both from the properties file two directories above its source, with the environment variables `LLM4DECOMPILE_MODEL` and `LLM4DECOMPILE_URL` taking precedence, and falls back to the same defaults in code.
+- Prompt format is byte-exact for the V2 (Ref) models: `"# This is the assembly code:\n" + <Ghidra's C> + "\n# What is the source code?\n"`, sent to `POST /api/generate` with `raw: true`, `stream: false`, `temperature: 0`, `num_ctx: 4096`, `num_predict: 2048`. Output goes to the function's plate comment below `--- LLM4Decompile (<model>) ---` (an earlier block is replaced, text above it kept) and to the console as `LLM4DECOMPILE OK <function> <chars> chars`; errors are one `LLM4DECOMPILE FAIL <reason>` line, with a thrown exception headlessly.
+- The model lives in Ollama's store (`~/.ollama`), outside `portable/` by design: it is Ollama's data, like Node's is npm's. `make clean`/`distclean` leave it; the README gives the `ollama rm` line.
+- The stage always assembles the extension and only gates the pull: without `ollama` on `PATH` or a serving daemon it warns and continues; a failed pull warns too. `make test`'s `llm4decompile` section always checks the extension and the script's error paths (bad function, unreachable server), and SKIPs the model run when Ollama or the model is absent. Tests never pull the model.
 
 ---
 
@@ -123,12 +140,14 @@ Operational context, invariants and conventions for AI coding agents working in 
 | `10` | `10-install-findcrypt` (`install-findcrypt`) | Builds and installs GhidraFindcrypt |
 | `11` | `11-install-binexport` (`install-binexport`) | Builds and installs BinExport (`java/`) |
 | `12` | `12-install-scripts` (`install-scripts`) | Installs Ghidra's Jython extension and assembles D2GridraTools |
+| `13` | `13-install-reva` (`install-reva`) | Builds and installs ReVa (`install_extension` macro, no source patch) |
 | — | `verify-extensions` | Checks headlessly that every extension's key classes load |
-| `13` | `13-pyghidra` (`pyghidra`) | Sets up PyGhidra's venv in `portable/` with `bundle_mpq` |
-| `14` | `14-venv` (`venv`) | Creates `.venv` and installs `bridge-mcp-ghidra` |
-| `15` | `15-register-mcp` (`register-mcp`) | Registers `ghidra` with opencode (atomic JSON write; a config that is not plain JSON, such as JSONC, is left unchanged with a warning) and Claude Code (`claude mcp add --scope user`, skipped if `claude` is absent), through the `register_mcp` macro |
-| `16` | `16-install-rea` (`install-rea`) | Installs REA 6.3.0 from its lockfile (`npm ci`), applies the Ghidra 12.2 compatibility patch, writes the `.rea/rea` wrapper and registers `rea` (`register_mcp`); warns and skips without suitable Node.js or when npm fails |
-| — | `test` | Sanity suite (`tests/run-sanity.sh`), in sections: `env`, `extensions`, `fixtures` (ELF/DOS/LE via `SanityCheck.java`), `mcp` (GhidraMCP over HTTP on `TEST_MCP_PORT`, 18089), `dist`, `binexport`, `portable`, `jython`, `pyghidra`, `rea`. `SANITY_ONLY=dist,pyghidra make test` runs a subset |
+| `14` | `14-pyghidra` (`pyghidra`) | Sets up PyGhidra's venv in `portable/` with `bundle_mpq` |
+| `15` | `15-venv` (`venv`) | Creates `.venv` and installs `bridge-mcp-ghidra` |
+| `16` | `16-register-mcp` (`register-mcp`) | Registers `ghidra` (`register_mcp`) and `reva` (`register_mcp_http`) with opencode (atomic JSON write; a config that is not plain JSON, such as JSONC, is left unchanged with a warning) and Claude Code (`claude mcp add --scope user`, skipped if `claude` is absent) |
+| `17` | `17-install-rea` (`install-rea`) | Installs REA 6.3.0 from its lockfile (`npm ci`), applies the Ghidra 12.2 compatibility patch, writes the `.rea/rea` wrapper and registers `rea` (`register_mcp`); warns and skips without suitable Node.js or when npm fails |
+| `18` | `18-install-llm4decompile` (`install-llm4decompile`) | Assembles the LLM4Decompile scripts-only extension and pulls `LLM4DECOMPILE_MODEL` into Ollama; warns and skips the pull without Ollama |
+| — | `test` | Sanity suite (`tests/run-sanity.sh`), in sections: `env`, `extensions`, `fixtures` (ELF/DOS/LE via `SanityCheck.java`), `mcp` (GhidraMCP over HTTP on `TEST_MCP_PORT`, 18089), `dist`, `binexport`, `portable`, `jython`, `pyghidra`, `reva`, `llm4decompile`, `rea`. `SANITY_ONLY=dist,pyghidra make test` runs a subset |
 
 Runtime and maintenance: `install` (runs `$(PIPELINE)`, all of the above, with `verify-extensions` after stage 12 so a broken extension stops the install before MCP registration, ending with `test`), `run`, `run-bridge`, `verify` (probes `http://127.0.0.1:8089/check_connection`), `clean`, `distclean`.
 
@@ -141,7 +160,7 @@ Runtime and maintenance: `install` (runs `$(PIPELINE)`, all of the above, with `
    - Every stage is idempotent: skip when its output exists, use `unzip -q -o` and `rm -rf`.
    - Propagate errors (`|| exit 1`, `{ ...; exit 1; }`).
    - Print messages with the `$(OK)`, `$(WARN)` and `$(ERR)` helpers (ANSI via `printf`).
-   - Add new extensions through `$(call install_extension,dir,src,zip glob[,legacy dir][,gradle subdir][,commit dir][,patch identity])`, add a check to `VerifyExtensions.java`, add `PACKAGE_PATTERNS` and `BUILD_OUTPUTS` entries in `tests/run-sanity.sh`, and add its build directories to `clean`.
+   - Add new extensions through `$(call install_extension,dir,src,zip glob[,legacy dir][,gradle subdir][,commit dir][,patch identity])`, add a check to `VerifyExtensions.java`, add `PACKAGE_PATTERNS` and `BUILD_OUTPUTS` entries in `tests/run-sanity.sh`, and add its build directories to `clean`. Scripts-only extensions follow `scripts/install-d2gridratools.sh` and `scripts/install-llm4decompile.sh` instead.
    - Give every user-facing target a `## description`; `make help` lists those.
 2. **Bash scripts:** use `set -euo pipefail` and validate with `bash -n <script>`. `build-ghidra.sh` expects `JAVA_HOME` (a full JDK 25, independently revalidated) from the Makefile.
 3. **JDK requirement:** every JDK reference is a full JDK: `bin/java` and `bin/javac` must both be executable and report major 25. The reusable `$(call jdk_usable,dir)` check enforces this in `00-deps` (JDK package installation), `00-env`, `03-install-ghidra` and `test`; Linux discovery only accepts homes with both binaries. A JRE-only or wrong-major `JAVA25_HOME` fails `make env`/`make test` and `build-ghidra.sh` with an explicit message. A **headless-only** JDK (Ubuntu's `openjdk-25-jdk-headless` + `openjdk-25-jre-headless`) passes `jdk_usable` but cannot open Ghidra's GUI: it lacks `libawt_xawt.so`, so `GraphicsEnvironment.isHeadless()` is true and the GUI exits with code 1. `$(call jdk_gui_capable,dir)` detects this on Linux (always true on macOS); `00-deps` adds `openjdk-25-jre` for a headless JDK under `/usr/lib/jvm` (and warns for a custom headless `JAVA25_HOME`), `00-env` warns, and `make run` fails with an actionable message instead of launch.sh's generic "Exited with error". `make run` checks the JDK pinned in `support/launch.properties` (`LAUNCH_JDK`), which is what the launcher actually uses; `make test` only needs a headless JDK.
