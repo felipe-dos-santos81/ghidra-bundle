@@ -7,7 +7,9 @@
 #        TEST_MCP_PORT=18089  port for the GhidraMCP test server (default 18089)
 #        TEST_IMPORT_TIMEOUT=600  seconds before a fixture import is killed (default 600)
 #        SANITY_ONLY=dist,jython  run only these sections: env, extensions, fixtures,
-#                                 mcp, dist, binexport, portable, jython, pyghidra, reva, rea
+#                                 mcp, dist, binexport, portable, jython, pyghidra, reva,
+#                                 llm4decompile, rea
+#        LLM4DECOMPILE_MODEL=<tag> model the Makefile pulls; the installed properties must name it
 #        PACKAGES_DIR=<dir>       built zips to check (default: <install dir>/../packages)
 #        REA_BIN=<file>           REA wrapper written by `make install-rea` (default: <repo>/.rea/rea)
 # Needs GNU timeout (Linux: coreutils; macOS: `brew install coreutils` for gtimeout).
@@ -33,7 +35,7 @@ indent() { sed 's/^/    /'; }
 fail_with_log() { fail "$1"; tail -20 "$2" | indent; }  # fail_with_log <message> <log file>
 
 # want <section>: true when SANITY_ONLY is unset or lists <section> (comma-separated).
-SECTIONS=",env,extensions,fixtures,mcp,dist,binexport,portable,jython,pyghidra,reva,rea,"
+SECTIONS=",env,extensions,fixtures,mcp,dist,binexport,portable,jython,pyghidra,reva,llm4decompile,rea,"
 want() { [[ -z "${SANITY_ONLY:-}" || ",$SANITY_ONLY," == *",$1,"* ]]; }
 SANITY_ONLY=${SANITY_ONLY:-}
 for section in ${SANITY_ONLY//,/ }; do
@@ -596,7 +598,60 @@ check_reva() {
 
 if want reva; then check_reva; fi
 
-# ── 3i. REA ───────────────────────────────────────────────────────────────────
+# ── 3i. LLM4Decompile ─────────────────────────────────────────────────────────
+# run_script returns analyzeHeadless's status, which is 0 even when a script throws, so
+# every assertion reads the script's console lines.
+check_llm4decompile() {
+  local ext="$INSTALL_DIR/Ghidra/Extensions/LLM4Decompile" log="$WORK/llm4decompile.log"
+  local script="$ext/ghidra_scripts/LLM4DecompileRefine.java" model url want_model
+  if [[ ! -f "$script" || ! -f "$ext/llm4decompile.properties" ]]; then
+    fail "LLM4Decompile: $ext is incomplete (run 'make install-llm4decompile')"
+    return
+  fi
+  model=$(sed -n 's/^model=//p' "$ext/llm4decompile.properties")
+  url=$(sed -n 's/^url=//p' "$ext/llm4decompile.properties")
+  want_model=${LLM4DECOMPILE_MODEL:-}  # exported by the Makefile's test target
+  if [[ -n "$model" && ( -z "$want_model" || "$model" == "$want_model" ) ]]; then
+    pass "LLM4Decompile: properties name the Makefile's model ($model)"
+  else
+    fail "LLM4Decompile: properties model '$model' differs from the Makefile's '$want_model'"
+  fi
+  if [[ -z "$SAMPLE" ]]; then
+    fail "LLM4Decompile: not checked (needs sample.o, which clang could not build)"
+    return
+  fi
+  # Unknown function, then unreachable server: the script must compile, print one FAIL
+  # line each and never an OK line.
+  LLM4DECOMPILE_URL=http://127.0.0.1:1 run_script "$log" "$SAMPLE" LLM4DecompileRefine.java nosuchfn \
+    -postScript LLM4DecompileRefine.java compute || true
+  if grep -q 'LLM4DECOMPILE FAIL no function nosuchfn' "$log" \
+      && grep -q 'LLM4DECOMPILE FAIL cannot reach http://127.0.0.1:1' "$log" \
+      && ! grep -q 'LLM4DECOMPILE OK' "$log"; then
+    pass "LLM4Decompile: script compiles and reports a bad function and an unreachable server"
+  else
+    fail_with_log "LLM4Decompile: error runs did not report cleanly" "$log"
+    return
+  fi
+  if ! curl -sf -m 5 "$url/api/version" >/dev/null 2>&1; then
+    skip "LLM4Decompile: Ollama is not serving at $url (optional)"
+    return
+  fi
+  if ! ollama show "$model" >/dev/null 2>&1; then
+    skip "LLM4Decompile: model $model is not pulled (run 'make install-llm4decompile')"
+    return
+  fi
+  run_script "$log" "$SAMPLE" LLM4DecompileRefine.java compute -postScript LLM4DecompileRefine.java compute || true
+  if (($(grep -c 'LLM4DECOMPILE OK compute' "$log") == 2)) && grep -q 'LLM4DECOMPILE REPLACED' "$log" \
+      && sed -n '/LLM4DECOMPILE OK compute/,$p' "$log" | grep -q '{'; then
+    pass "LLM4Decompile: refined compute twice through $model ($(grep -o 'LLM4DECOMPILE OK compute [0-9]* chars' "$log" | head -n 1))"
+  else
+    fail_with_log "LLM4Decompile: refining compute failed" "$log"
+  fi
+}
+
+if want llm4decompile; then check_llm4decompile; fi
+
+# ── 3j. REA ───────────────────────────────────────────────────────────────────
 check_rea_patch() {
   local log="$WORK/rea-policy-tests.log"
   if python3 -I "$TESTS/test_patch_rea_ghidra.py" > "$log" 2>&1; then
