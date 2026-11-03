@@ -245,6 +245,7 @@ check_mcp() {
   mkdir -p "$WORK/mcp"/{home,settings,cache,temp}
   echo "Starting GhidraMCP headless server on 127.0.0.1:$MCP_PORT..."
   env -u GHIDRA_MCP_AUTH_TOKEN -u GHIDRA_MCP_PROJECT_FOLDER -u GHIDRA_MCP_FILE_ROOT \
+    GHIDRA_MCP_ALLOW_SCRIPTS=1 \
     "$JAVA_HOME/bin/java" -Djava.awt.headless=true \
     -Duser.home="$WORK/mcp/home" -Djava.io.tmpdir="$WORK/mcp/temp" \
     -Dapplication.settingsdir="$WORK/mcp/settings" \
@@ -342,6 +343,18 @@ print(names["compute"] if {"compute", "helper"} <= names.keys() else "")
     pass "GhidraMCP: deleted type is absent"
   else
     fail "GhidraMCP: /get_type_size confirms deletion (got ${out:0:200})"
+  fi
+
+  # The agent route for the refine script: run_ghidra_script finds ./ghidra_scripts from
+  # the repo root (make test's working directory) and must return the script's FAIL line
+  # for a bad function name without a model request.
+  out=$(curl -s -m 120 -X POST -H 'Content-Type: application/json' \
+    -d '{"script_name":"LLM4DecompileRefine.java","args":"nosuchfn","timeout_seconds":60}' \
+    "$url/run_ghidra_script" || true)
+  if [[ "$out" == *"LLM4DECOMPILE FAIL no function nosuchfn"* ]]; then
+    pass "GhidraMCP: /run_ghidra_script runs LLM4DecompileRefine.java and returns its FAIL line"
+  else
+    fail "GhidraMCP: /run_ghidra_script LLM4DecompileRefine.java nosuchfn (got ${out:0:200})"
   fi
 
   stop_mcp
@@ -590,9 +603,11 @@ check_reva() {
     -deleteProject -scriptPath "$TESTS/probes" -preScript reva_probe.py < /dev/null > "$log" 2>&1) || status=$?
   ((status == 0)) || echo "pyghidraRun exit status $status" >> "$log"
   if grep -q 'REVA OK' "$log"; then
-    pass "ReVa: headless MCP server answers initialize ($(grep -o 'REVA OK port [0-9]*' "$log" | head -n 1))"
+    pass "ReVa: headless MCP server answers initialize and tools/list ($(grep -o 'REVA OK port .*' "$log" | head -n 1 | sed 's/ (GhidraScript).*//'))"
+  elif grep -q 'REVA FAIL' "$log"; then
+    fail "ReVa: $(grep -o 'REVA FAIL .*' "$log" | head -n 1 | sed 's/ (GhidraScript).*//')"
   else
-    fail_with_log "ReVa: headless MCP server did not answer initialize" "$log"
+    fail_with_log "ReVa: probe did not run" "$log"
   fi
 }
 
@@ -640,12 +655,26 @@ check_llm4decompile() {
     skip "LLM4Decompile: model $model is not pulled (run 'make install-llm4decompile')"
     return
   fi
-  run_script "$log" "$SAMPLE" LLM4DecompileRefine.java compute -postScript LLM4DecompileRefine.java compute || true
-  if (($(grep -c 'LLM4DECOMPILE OK compute' "$log") == 2)) && grep -q 'LLM4DECOMPILE REPLACED' "$log" \
-      && sed -n '/LLM4DECOMPILE OK compute/,$p' "$log" | grep -q '{'; then
+  # Seed the plate comment with a user note and a stale block from another model, refine
+  # twice, then read the comment back: one block, the note kept, the stale block gone.
+  run_script "$log" "$SAMPLE" PlateComment.java compute seed \
+    -postScript LLM4DecompileRefine.java compute -postScript LLM4DecompileRefine.java compute \
+    -postScript PlateComment.java compute print || true
+  plate=$(sed -n '/PLATE BEGIN/,/PLATE END/p' "$log")
+  if (($(grep -c 'LLM4DECOMPILE OK compute' "$log") == 2)) && (($(grep -c 'LLM4DECOMPILE REPLACED' "$log") == 2)) \
+      && sed -n '/LLM4DECOMPILE OK compute/,$p' "$log" | grep -q '{' \
+      && sed -n '/LLM4DECOMPILE OK compute/,$p' "$log" | grep -q '}'; then
     pass "LLM4Decompile: refined compute twice through $model ($(grep -o 'LLM4DECOMPILE OK compute [0-9]* chars' "$log" | head -n 1))"
   else
     fail_with_log "LLM4Decompile: refining compute failed" "$log"
+    return
+  fi
+  if (($(grep -c -- '--- LLM4Decompile (' <<< "$plate") == 1)) && grep -q 'user note' <<< "$plate" \
+      && ! grep -q 'old junk' <<< "$plate"; then
+    pass "LLM4Decompile: plate comment keeps the user's note and holds exactly one block"
+  else
+    fail "LLM4Decompile: plate comment after two runs:"
+    printf '%s\n' "$plate" | indent
   fi
 }
 

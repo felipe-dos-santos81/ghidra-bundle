@@ -8,8 +8,9 @@
 // "LLM4DECOMPILE FAIL <reason>".
 //
 // Model and server: environment variables LLM4DECOMPILE_MODEL and LLM4DECOMPILE_URL win;
-// else llm4decompile.properties (model=, url=) two directories above this file, which is
-// where the bundle's LLM4Decompile extension keeps it; else the defaults below.
+// else llm4decompile.properties (model=, url=) in the installed LLM4Decompile extension
+// (Ghidra/Extensions/LLM4Decompile/), or two directories above this file when run from a
+// checkout; else the defaults below.
 //@category LLM4Decompile
 
 import java.io.IOException;
@@ -23,12 +24,15 @@ import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 import generic.jar.ResourceFile;
+import ghidra.framework.Application;
 import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.decompiler.DecompileResults;
 import ghidra.app.script.GhidraScript;
@@ -41,6 +45,8 @@ public class LLM4DecompileRefine extends GhidraScript {
 
 	private static final String DEFAULT_MODEL = "hf.co/mradermacher/llm4decompile-9b-v2-GGUF:Q8_0";
 	private static final String DEFAULT_URL = "http://127.0.0.1:11434";
+	private static final String PROPERTIES = "llm4decompile.properties";
+	private static final String MARKER_PREFIX = "--- LLM4Decompile (";
 	// The V2 models were trained on exactly this framing of Ghidra's output.
 	private static final String PROMPT_BEFORE = "# This is the assembly code:\n";
 	private static final String PROMPT_AFTER = "\n# What is the source code?\n";
@@ -102,10 +108,13 @@ public class LLM4DecompileRefine extends GhidraScript {
 		String url = System.getenv("LLM4DECOMPILE_URL");
 		if (model == null || url == null) {
 			Properties props = new Properties();
-			ResourceFile dir = getSourceFile() == null ? null : getSourceFile().getParentFile();
-			ResourceFile file = dir == null || dir.getParentFile() == null ? null
-					: new ResourceFile(dir.getParentFile(), "llm4decompile.properties");
-			if (file != null && file.isFile()) {
+			ResourceFile file = new ResourceFile(Application.getInstallationDirectory(),
+				"Ghidra/Extensions/LLM4Decompile/" + PROPERTIES);
+			if (!file.isFile() && getSourceFile() != null && getSourceFile().getParentFile() != null &&
+				getSourceFile().getParentFile().getParentFile() != null) {
+				file = new ResourceFile(getSourceFile().getParentFile().getParentFile(), PROPERTIES);
+			}
+			if (file.isFile()) {
 				try (InputStream in = file.getInputStream()) {
 					props.load(in);
 				}
@@ -144,12 +153,26 @@ public class LLM4DecompileRefine extends GhidraScript {
 				.POST(HttpRequest.BodyPublishers.ofString(new Gson().toJson(body), StandardCharsets.UTF_8))
 				.build();
 		HttpResponse<String> response;
+		CompletableFuture<HttpResponse<String>> pending =
+			HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build()
+					.sendAsync(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
 		try {
-			response = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build()
-					.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+			while (!pending.isDone()) {
+				if (monitor.isCancelled()) {
+					pending.cancel(true);
+					monitor.checkCancelled();
+				}
+				Thread.sleep(200);
+			}
+			response = pending.get();
 		}
-		catch (IOException | InterruptedException e) {
-			fail("cannot reach " + url + ": " + e);
+		catch (ExecutionException e) {
+			fail("cannot reach " + url + ": " + e.getCause());
+			return null;
+		}
+		catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			fail("interrupted while waiting for " + url);
 			return null;
 		}
 		if (response.statusCode() != 200) {
@@ -164,11 +187,11 @@ public class LLM4DecompileRefine extends GhidraScript {
 	}
 
 	private void writeComment(Function f, String model, String c) {
-		String marker = "--- LLM4Decompile (" + model + ") ---";
+		String marker = MARKER_PREFIX + model + ") ---";
 		String existing = currentProgram.getListing().getComment(CommentType.PLATE, f.getEntryPoint());
 		String kept = "";
 		if (existing != null) {
-			int at = existing.indexOf(marker);
+			int at = existing.indexOf(MARKER_PREFIX);
 			if (at >= 0) {
 				kept = existing.substring(0, at).strip();
 				println("LLM4DECOMPILE REPLACED");
@@ -183,7 +206,9 @@ public class LLM4DecompileRefine extends GhidraScript {
 
 	private void fail(String reason) throws Exception {
 		printerr("LLM4DECOMPILE FAIL " + reason);
-		if (isRunningHeadless()) {
+		// Agents (GhidraMCP runs scripts on the Swing thread) and headless runs always pass
+		// a function argument; a dialog there would block until a human dismissed it.
+		if (isRunningHeadless() || getScriptArgs().length > 0) {
 			throw new RuntimeException(reason);
 		}
 		popup(reason);
